@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Kitten4 协作聊天（Kitten4-Collaborative-Chat）",
-  "version": "3.5",
+  "version": "3.6",
   "description": "在 Kitten4 多人协作里无痕聊天：消息伪装成一条原生注释经协作通道传输，不写进作品、不在画布留痕。",
   "icons": {
     "16": "icon16.png",

@@ -1,17 +1,17 @@
-/* ============================================================================
- * Kitten4 协作聊天（Kitten4-Collaborative-Chat）
- * 透明液态毛玻璃，整体跟着编辑器主题色走（默认晴天橙 #FF7829）：
- * 主色由 content.js 读取 --theme-color-0，写进 --cmc-tint / -soft / -deep 三个变量。
- * 玻璃的三件事：透（底色 24%~52% + blur(26~44px) 把背后糊开）、
- * 厚（1px 发丝描边 + 四边内高光 + 底部内阴影）、染（一层 8% 主题色覆膜）。
- * 所有类名以 cmc- 前缀，避免和编辑器冲突。
- * ==========================================================================*/
+
+
+
+
+
+
+
+
 
 .cmc-root {
     --cmc-ink: #15171b;
     --cmc-dim: rgba(27, 27, 27, .68);
     --cmc-line: rgba(37, 37, 37, .09);
-    /* 跟随编辑器主题色：content.js 会把这三个值换成 --theme-color-0 派生的 RGB */
+    
     --cmc-tint: 255, 120, 41;
     --cmc-tint-soft: 255, 204, 174;
     --cmc-tint-deep: 168, 79, 27;
@@ -32,7 +32,7 @@
 }
 .cmc-root * { box-sizing: border-box; }
 
-/* 松手贴边时 left/top 才有过渡；拖动过程中必须跟手 */
+
 .cmc-root.cmc-anim {
     transition:
         left .34s cubic-bezier(.22, 1.16, .28, 1),
@@ -49,7 +49,7 @@
     transition: opacity .24s ease, transform .28s ease, visibility 0s .28s;
 }
 
-/* ---------------------------------------------------------------- 悬浮玻璃球 */
+
 
 .cmc-btn {
     position: relative;
@@ -76,7 +76,7 @@
         inset 0 -12px 18px -14px rgba(62, 62, 62, .45);
     transition: transform .3s cubic-bezier(.22, 1, .28, 1.2), box-shadow .3s ease, background .2s ease;
 }
-/* 镜面高光：只有白色，没有彩色渐变 */
+
 .cmc-btn::before {
     content: "";
     position: absolute;
@@ -98,7 +98,7 @@
 .cmc-btn:active { transform: scale(.94); }
 .cmc-root.cmc-open .cmc-btn { transform: scale(.96); }
 
-/* 拖动中：球「拎起来」一点，面板跟着走但不吃指针 */
+
 .cmc-root.cmc-dragging .cmc-btn {
     cursor: grabbing;
     transform: scale(1.08);
@@ -144,7 +144,7 @@
         inset 0 1px 0 rgba(255, 255, 255, .98);
     animation: cmc-badge-in .3s cubic-bezier(.22, 1, .3, 1.4) both;
 }
-/* 被 @ 的角标用深色，比数字醒目 */
+
 .cmc-badge.cmc-badge-at {
     color: #fff;
     background: #27b56a;
@@ -153,7 +153,7 @@
 }
 .cmc-hidden { display: none !important; }
 
-/* ---------------------------------------------------------------- 玻璃面板 */
+
 
 .cmc-panel {
     position: absolute;
@@ -187,7 +187,7 @@
         transform .34s cubic-bezier(.22, 1, .28, 1.16),
         visibility 0s;
 }
-/* 一层很薄的白覆膜：只提亮，不染色 */
+
 .cmc-panel::before {
     content: "";
     position: absolute;
@@ -200,9 +200,9 @@
         inset 0 -24px 40px -34px rgba(57, 57, 57, .32);
 }
 
-/* 球在右半边：面板钉右边，免得冲出屏幕 */
+
 .cmc-panel.cmc-panel-right { left: auto; right: 0; transform-origin: bottom right; }
-/* 球在上半屏：面板往下翻 */
+
 .cmc-panel.cmc-panel-down { bottom: auto; top: 58px; transform-origin: top left; }
 .cmc-panel.cmc-panel-down.cmc-panel-right { transform-origin: top right; }
 
@@ -219,7 +219,7 @@
 }
 .cmc-panel.cmc-panel-down.cmc-hidden { transform: scale(.9) translateY(-8px); }
 
-/* ---------------------------------------------------------------- 头部 */
+
 
 .cmc-head {
     position: relative;
@@ -273,7 +273,7 @@
     50%      { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55), 0 0 0 5px rgba(100, 100, 100, .05); }
 }
 
-/* 名字#id */
+
 .cmc-me {
     margin-left: auto;
     max-width: 132px;
@@ -296,7 +296,7 @@
         0 2px 6px -4px rgba(48, 48, 48, .34);
 }
 
-/* ---------------------------------------------------------------- 状态行 */
+
 
 .cmc-bar {
     position: relative;
@@ -310,7 +310,7 @@
     overflow: hidden;
     text-overflow: ellipsis;
 }
-/* ---------------------------------------------------------------- 消息区 */
+
 
 .cmc-list {
     position: relative;
@@ -326,7 +326,7 @@
     scrollbar-width: thin;
     scrollbar-color: rgba(55, 55, 55, .18) transparent;
 }
-/* 底部冒了「@ 了你」按钮时，给最后一条消息让出位置 */
+
 .cmc-panel.cmc-jump-on .cmc-list { padding-bottom: 44px; }
 .cmc-list::-webkit-scrollbar { width: 5px; }
 .cmc-list::-webkit-scrollbar-track { background: transparent; }
@@ -347,10 +347,10 @@
     to   { opacity: 1; transform: none; }
 }
 
-/* 只有新消息进场时播一次，已有气泡不会被重画/重播 */
+
 .cmc-row-in { animation: cmc-pop .3s cubic-bezier(.22, 1, .3, 1.12) both; }
 
-/* 自己的：更亮一点的玻璃 */
+
 .cmc-self {
     align-self: flex-end;
     border-bottom-right-radius: 6px;
@@ -365,7 +365,7 @@
         inset 0 -10px 16px -16px rgba(56, 56, 56, .3);
 }
 
-/* 对方的：更薄一点的玻璃 */
+
 .cmc-other {
     align-self: flex-start;
     border-bottom-left-radius: 6px;
@@ -427,7 +427,7 @@
 }
 .cmc-sys-bad { color: #a82a22; border-color: rgba(255, 255, 255, .58); }
 
-/* ---------------------------------------------------------------- 输入区 */
+
 
 .cmc-input-area {
     position: relative;
@@ -512,7 +512,7 @@
 }
 #cmc-send:active { transform: scale(.96); }
 
-/* ---------------------------------------------------------------- 动效 */
+
 
 @keyframes cmc-badge-in {
     from { opacity: 0; transform: scale(.4); }
@@ -526,7 +526,7 @@
 }
 .cmc-btn.cmc-flash { animation: cmc-flash-kf .9s ease-out 2; }
 
-/* 小屏收敛 */
+
 @media (max-width: 430px) {
     .cmc-root { left: 12px; bottom: 12px; }
     .cmc-panel {
@@ -536,7 +536,7 @@
     }
 }
 
-/* 尊重系统的「减弱动态效果」 */
+
 @media (prefers-reduced-motion: reduce) {
     .cmc-dot-wait,
     .cmc-badge,
@@ -547,7 +547,7 @@
     .cmc-btn-icon, .cmc-btn-chevron { transition-duration: .01ms !important; }
 }
 
-/* ---------------------------------------------------------------- 头像 / 图片 / @ */
+
 
 .cmc-row {
     display: flex;
@@ -557,7 +557,7 @@
 }
 .cmc-row-self { flex-direction: row-reverse; }
 
-/* 空态：一块居中的淡蓝提示，比一片空白玻璃体面 */
+
 .cmc-empty {
     margin: auto;
     padding: 8px 16px 22px;
@@ -604,7 +604,7 @@
 
 .cmc-msg { max-width: calc(100% - 39px); }
 
-/* 一次连发的多张图：同一个气泡里排成宫格 */
+
 .cmc-imgs {
     display: grid;
     grid-template-columns: repeat(2, 82px);
@@ -626,7 +626,6 @@
     cursor: zoom-in;
     border: 1px solid rgba(255, 255, 255, .78);
     box-shadow: 0 4px 14px -10px rgba(45, 45, 45, .6);
-    background: rgba(255, 255, 255, .24);
 }
 .cmc-imgs-3 .cmc-img { height: 54px; }
 .cmc-imgs-1 .cmc-img {
@@ -637,7 +636,7 @@
     border-radius: 11px;
 }
 
-/* 被 @ 到：一圈深色描边 */
+
 .cmc-at {
     box-shadow:
         0 0 0 1.5px rgba(var(--cmc-tint), .5),
@@ -654,7 +653,7 @@
     background: var(--cmc-accent);
 }
 
-/* 跳到那条 @ 消息以后，闪两下 */
+
 .cmc-row.cmc-hit .cmc-msg { animation: cmc-hit-ring 1.6s ease-out 1; }
 @keyframes cmc-hit-ring {
     0%   { box-shadow: 0 0 0 0 rgba(var(--cmc-tint), .6), inset 0 1px 0 rgba(255, 255, 255, .9); }
@@ -662,7 +661,7 @@
     100% { box-shadow: 0 0 0 0 rgba(var(--cmc-tint), 0), inset 0 1px 0 rgba(255, 255, 255, .9); }
 }
 
-/* 输入区里的两个玻璃小按钮 */
+
 .cmc-icon-btn {
     flex: 0 0 auto;
     width: 27px;
@@ -688,7 +687,7 @@
 
 .cmc-file { display: none !important; }
 
-/* 待发送图片预览 */
+
 .cmc-preview {
     position: relative;
     z-index: 1;
@@ -698,7 +697,7 @@
     gap: 8px;
     padding: 8px 12px 0;
 }
-/* 多选时横向排开，多了可以横滑，不挤压输入框 */
+
 .cmc-preview-strip {
     display: flex;
     align-items: center;
@@ -707,8 +706,8 @@
     overflow-x: auto;
     overflow-y: hidden;
     padding: 6px 12px 5px 0;
-    scrollbar-width: none;          /* 条子很窄，滚动条会显得很脏，直接藏掉 */
-    /* 右边留一点渐隐，提示还能往右滑 */
+    scrollbar-width: none;          
+    
     -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
     mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
 }
@@ -771,7 +770,7 @@
 }
 .cmc-preview-x:hover { color: var(--cmc-ink); background: rgba(255, 255, 255, .36); }
 
-/* @ 候选：玻璃浮层 */
+
 .cmc-mention {
     position: absolute;
     left: 10px;
@@ -813,7 +812,7 @@
 .cmc-mention-id { font-size: 9.5px; color: rgba(36, 36, 36, .44); }
 .cmc-mention-empty { padding: 10px 8px; font-size: 11px; color: rgba(36, 36, 36, .44); text-align: center; }
 
-/* ---------------------------------------------------------------- @ 跳转按钮 */
+
 
 .cmc-jump {
     position: absolute;
@@ -851,7 +850,7 @@
 .cmc-jump:hover { background: rgba(255, 255, 255, .92); }
 .cmc-jump:active { transform: translateX(-50%) scale(.96); }
 
-/* 面板往下翻时，按钮贴在输入框上方 */
+
 .cmc-panel-down .cmc-jump { bottom: 60px; }
 
 .cmc-jump-dot {
@@ -876,7 +875,7 @@
     to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
 }
 
-/* 看大图 */
+
 .cmc-lightbox {
     position: fixed;
     inset: 0;
@@ -895,19 +894,5 @@
     border-radius: 14px;
     border: 1px solid rgba(255, 255, 255, .5);
     box-shadow: 0 30px 70px -24px rgba(0, 0, 0, .65);
-    background: #fff;
 }
 @keyframes cmc-fade { from { opacity: 0; } to { opacity: 1; } }
-
-/* 透明图（PNG/WebP 带 alpha）：底下铺一层很淡的棋盘格，
-   透明区域一眼看得出来；不透明的图会把自己的底盖住，看起来跟以前一样。 */
-.cmc-thumb img,
-.cmc-img,
-.cmc-lightbox img {
-    background-color: rgba(255, 255, 255, .62);
-    background-image:
-        linear-gradient(45deg, rgba(84, 84, 84, .1) 25%, transparent 25%, transparent 75%, rgba(84, 84, 84, .1) 75%),
-        linear-gradient(45deg, rgba(84, 84, 84, .1) 25%, transparent 25%, transparent 75%, rgba(84, 84, 84, .1) 75%);
-    background-size: 8px 8px, 8px 8px;
-    background-position: 0 0, 4px 4px;
-}

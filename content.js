@@ -1,18 +1,18 @@
-/* ============================================================================
- * Kitten4 协作聊天（Kitten4-Collaborative-Chat）  UI（隔离世界）
- * 只负责界面；收发全部通过 postMessage 交给 inject.js
- *  - CM_SEND     → 请求发送（text / img / mentions）
- *  - CM_SENT     → 发送结果（ok / error）
- *  - CM_ACK      → 服务器 operation_ack（code=1 即已接收）
- *  - CM_RECEIVE  → 收到别人的消息（含头像 / 图片 / @）
- *  - CM_STATUS   → 连接 / 房间 / 作品名
- *  - CM_IDENTITY → 我的协作 id + 站内昵称 + 在线成员（含头像）
- * ==========================================================================*/
+
+
+
+
+
+
+
+
+
+
 (function () {
     'use strict';
     if (window.__cmChatUI) return;
 
-    // 只在编辑器首页启用（作品页、社区页都不跑）；file:// 留给本地测试
+    
     var IS_EDITOR = (location.host === 'kitten4.codemao.cn' && location.pathname === '/');
     if (!IS_EDITOR && location.protocol !== 'file:') return;
 
@@ -21,7 +21,7 @@
     var myId = null;
     var myName = '';
     var myAvatar = '';
-    var users = [];            // [{id,n,a}]
+    var users = [];            
 
     var st = {
         connected: false, roomId: null, projectName: '', actorId: null,
@@ -29,36 +29,36 @@
     };
     var msgs = [];
     var reqSeq = 0;
-    var pendingSend = {};      // reqId -> msg
-    var waitingAck = [];       // 等待服务器回执的消息（FIFO）
-    var ackCredit = 0;         // 回执比「发送成功」先到时的欠条（网络快的时候真会发生）
+    var pendingSend = {};      
+    var waitingAck = [];       
+    var ackCredit = 0;         
     var unread = 0;
-    var atPending = false;     // 关着面板时被 @ 过（角标显示 @，不被普通消息覆盖）
-    var pageFocused = true;    // 这个标签/窗口在不在眼前（切窗口会失焦，切标签会 hidden）
+    var atPending = false;     
+    var pageFocused = true;    
     var TITLE_BASE_DEFAULT = '全新源码编辑器 - 搭积木一样有趣的编程工具';
-    var TITLE_RE = /^（你有\d+条消息未读）/;   // 我们自己加在标题前面的那段
+    var TITLE_RE = /^（你有\d+条消息未读）/;   
     var nodes = {};
     var open = false;
     var hideTimer = null;
-    var pendingImgs = [];      // 待发送图片（可多张，{url,w,h,kb}）
-    var MAX_IMGS = 9;          // 一次最多选多少张
-    var SEND_GAP = 600;        // 多图分条发送的间隔（ms）
+    var pendingImgs = [];      
+    var MAX_IMGS = 9;          
+    var SEND_GAP = 600;        
     var mention = { open: false, items: [], index: 0 };
 
-    /* 悬浮球位置（苹果「辅助触控」那种：可拖动、松手贴边、位置记住） */
+    
     var POS_KEY = 'cmc.pos.v1';
-    var pos = null;            // {x,y} 球左上角的视口坐标
-    var dragStart = null;      // 拖拽起点
+    var pos = null;            
+    var dragStart = null;      
     var dragMoved = 0;
-    var suppressClick = false; // 拖完那一下不要把面板点开／关掉
+    var suppressClick = false; 
     var dragRaf = 0;
 
-    /* @ 跳转：消息滚出视野时冒出来的小按钮 */
-    var atSeen = {};           // 已经跳过去看过的 @ 消息
-    var jumpKey = '';          // 当前按钮指向的那条消息
-    var jumpFallbackT = 0;     // 平滑滚动的兜底定时器
+    
+    var atSeen = {};           
+    var jumpKey = '';          
+    var jumpFallbackT = 0;     
     var scrollRaf = 0;
-    var stickBottom = true;    // 是不是「贴着底部」（用户往上翻时就变成 false）
+    var stickBottom = true;    
 
     window.__cmUiDebug = { clicks: 0, opens: 0, closes: 0 };
 
@@ -69,7 +69,7 @@
         return n;
     }
     function pad(n) { return (n < 10 ? '0' : '') + n; }
-    /* 控制台发送日志：一条协议帧一行，便于排查「到底发出去了什么」 */
+    
     function sendLog(reqId, text, img, mentions, group, gi, gt) {
         try {
             if (!console || !console.log) return;
@@ -113,13 +113,13 @@
             img.referrerPolicy = 'no-referrer';
             box.appendChild(img);
         } else {
-            // 没有头像地址：留一个中性玻璃方块，只放首字，不上色
+            
             box.appendChild(el('span', 'cmc-ava-txt', initial(name)));
         }
         return box;
     }
 
-    /* ---------------- 构建界面 ---------------- */
+    
 
     var ICON_AT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">' +
         '<circle cx="12" cy="12" r="4.1"/><path d="M16.1 12v1.4a2.5 2.5 0 0 0 5 0V12a9.1 9.1 0 1 0-3.4 7.1"/></svg>';
@@ -156,14 +156,14 @@
 
         var list = el('div', 'cmc-list');
         list.id = 'cmc-list';
-        // 空态：面板打开但还没有任何消息时，别给一块空白玻璃
+        
         var empty = el('div', 'cmc-empty');
         empty.id = 'cmc-empty';
         empty.appendChild(el('div', 'cmc-empty-t', '还没有消息'));
         list.appendChild(empty);
         panel.appendChild(list);
 
-        // 图片预览条
+        
         var preview = el('div', 'cmc-preview cmc-hidden');
         preview.id = 'cmc-preview';
         var previewStrip = el('div', 'cmc-preview-strip');
@@ -178,12 +178,12 @@
         preview.appendChild(previewX);
         panel.appendChild(preview);
 
-        // @ 候选列表
+        
         var menu = el('div', 'cmc-mention cmc-hidden');
         menu.id = 'cmc-mention';
         panel.appendChild(menu);
 
-        // 「有人 @ 你，但那条消息滚上去了」时的跳转按钮
+        
         var jump = el('button', 'cmc-jump cmc-hidden');
         jump.id = 'cmc-jump';
         jump.type = 'button';
@@ -263,7 +263,7 @@
         badge.id = 'cmc-badge';
         btn.appendChild(badge);
 
-        // 看大图
+        
         var lightbox = el('div', 'cmc-lightbox cmc-hidden');
         lightbox.id = 'cmc-lightbox';
         var bigImg = document.createElement('img');
@@ -293,7 +293,7 @@
 
     function bind() {
         nodes.btn.addEventListener('click', function () {
-            if (suppressClick) { suppressClick = false; return; }   // 刚刚是拖拽，不是点击
+            if (suppressClick) { suppressClick = false; return; }   
             var dbg = window.__cmUiDebug;
             if (dbg) { dbg.clicks++; dbg.lastClickConnected = !!st.connected; dbg.lastClickOpen = open; }
             if (!st.connected) return;
@@ -305,7 +305,7 @@
             if (st.connected) setOpen(!open);
         });
 
-        // 拖动悬浮球（鼠标 + 触摸都用 pointer 事件）
+        
         nodes.btn.addEventListener('pointerdown', onDragStart);
         nodes.btn.addEventListener('pointermove', onDragMove);
         nodes.btn.addEventListener('pointerup', onDragEnd);
@@ -325,13 +325,13 @@
         nodes.imgBtn.addEventListener('click', function () { nodes.file.click(); });
         nodes.file.addEventListener('change', function () {
             var picked = nodes.file.files ? Array.prototype.slice.call(nodes.file.files) : [];
-            nodes.file.value = '';          // 清空，允许连续选同一批文件
+            nodes.file.value = '';          
             if (picked.length) addImages(picked);
         });
         nodes.previewX.addEventListener('click', clearImage);
         nodes.lightbox.addEventListener('click', function () { nodes.lightbox.classList.add('cmc-hidden'); });
 
-        // 点面板空白处收起 @ 列表
+        
         nodes.panel.addEventListener('mousedown', function (e) {
             if (!mention.open) return;
             if (nodes.menu.contains(e.target) || nodes.atBtn.contains(e.target)) return;
@@ -353,7 +353,7 @@
         window.addEventListener('message', onMessage);
     }
 
-    /* ---------------- 悬浮球位置 / 拖动 ---------------- */
+    
 
     function viewport() {
         return { w: window.innerWidth || document.documentElement.clientWidth || 360,
@@ -370,7 +370,7 @@
         };
     }
 
-    // animate=true 时让 left/top 走一段过渡（松手贴边那一下）
+    
     function applyPos(x, y, animate) {
         if (!nodes.root) return;
         pos = clampPos(x, y);
@@ -385,7 +385,7 @@
         placePanel();
     }
 
-    // 面板：球在右半边就钉右边，上方空间不够就往下翻
+    
     function placePanel() {
         if (!nodes.panel) return;
         var v = viewport(), s = ballSize();
@@ -407,7 +407,7 @@
         try { p = JSON.parse(localStorage.getItem(POS_KEY) || 'null'); } catch (e) { p = null; }
         var v = viewport(), s = ballSize();
         if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') {
-            p = { x: 20, y: v.h - s - 20 };     // 默认左下角（和以前一样）
+            p = { x: 20, y: v.h - s - 20 };     
         }
         applyPos(p.x, p.y, false);
     }
@@ -420,7 +420,7 @@
         var r = nodes.btn.getBoundingClientRect();
         dragStart = { px: e.clientX, py: e.clientY, x: r.left, y: r.top, id: e.pointerId };
         dragMoved = 0;
-        nodes.root.classList.remove('cmc-anim');   // 刚贴过边时左/上有过渡，拖起来必须跟手
+        nodes.root.classList.remove('cmc-anim');   
         nodes.root.classList.add('cmc-dragging');
         try { nodes.btn.setPointerCapture(e.pointerId); } catch (err) {}
     }
@@ -444,7 +444,7 @@
         try { nodes.btn.releasePointerCapture(e.pointerId); } catch (err) {}
 
         if (dragMoved > 6) {
-            // 拖过就不算点击；松手停在原地，不吸边（想放哪儿就放哪儿，只保证不出屏）
+            
             suppressClick = true;
             setTimeout(function () { suppressClick = false; }, 400);
             applyPos(pos.x, pos.y, false);
@@ -468,7 +468,7 @@
             atPending = false;
             placePanel();
             ping();
-            applyTitle();   // 看过了，标题还原
+            applyTitle();   
             setTimeout(function () {
                 if (!open) return;
                 if (stickBottom) nodes.list.scrollTop = nodes.list.scrollHeight;
@@ -479,7 +479,7 @@
             closeMention();
             hideJump();
             try { nodes.input.blur(); } catch (e) {}
-            // 面板开着时攒下的未读（人不在标签页）——收起面板时补到角标上
+            
             if (unread > 0) {
                 nodes.badge.textContent = atPending ? '@' : String(unread);
                 nodes.badge.classList.toggle('cmc-badge-at', atPending);
@@ -489,14 +489,14 @@
         }
     }
 
-    /* ---------------- 图片 ---------------- */
+    
 
     function clearImage() {
         pendingImgs = [];
         renderPreview();
     }
 
-    // 把一张图读进来并压成适合发协议的小 dataURL（≤ 约 54KB），失败回调 null
+    
     function readImage(file, cb) {
         var fr = new FileReader();
         fr.onerror = function () { cb(null, '这张图读不出来'); };
@@ -513,15 +513,15 @@
         fr.readAsDataURL(file);
     }
 
-    /* 编码策略：
-     * 不透明的图压 JPEG（最省）；
-     * 带透明的图必须走 PNG / WebP —— JPEG 没有 alpha 通道，透明的地方会变成黑块。
-     * 长边 600px 起步，塞不进一帧就逐级缩边长。
-     */
+    
+
+
+
+
     var IMG_MAX = 600;
-    var IMG_BUDGET = 52000;    // dataURL 长度（约 52KB）以内最理想
-    var IMG_HARD = 54000;      // 协议一帧的硬上限
-    var IMG_MIN = 200;         // 缩到这个边长还塞不进就放弃
+    var IMG_BUDGET = 52000;    
+    var IMG_HARD = 54000;      
+    var IMG_MIN = 200;         
 
     function hasAlpha(cv) {
         try {
@@ -556,7 +556,7 @@
         return null;
     }
 
-    // 不透明：600px + 0.82 起步，超出预算再逐步降质量（先保清晰）
+    
     function encodeJpeg(cv) {
         var q = 0.82, url = cv.toDataURL('image/jpeg', q);
         while (url.length > IMG_BUDGET && q > 0.34) {
@@ -566,7 +566,7 @@
         return url;
     }
 
-    // 透明：先试无损 PNG；太大就换 WebP（有损但保留 alpha，体积能小一半以上）
+    
     function encodeAlpha(cv) {
         var best = cv.toDataURL('image/png');
         if (best.length <= IMG_BUDGET) return best;
@@ -574,7 +574,7 @@
         for (var q = 0.94; q >= 0.5; q -= 0.06) {
             var webp;
             try { webp = cv.toDataURL('image/webp', q); } catch (e) { break; }
-            // 不支持 webp 的浏览器会退回 png，这种就不要再折腾了
+            
             if (!webp || webp.indexOf('data:image/webp') !== 0) break;
             if (webp.length < best.length) best = webp;
             if (best.length <= IMG_BUDGET) break;
@@ -593,7 +593,7 @@
             updateAtJump();
             return;
         }
-        hideJump();   // 预览条展开时别让跳转按钮压在上面
+        hideJump();   
 
         pendingImgs.forEach(function (it, idx) {
             var box = el('div', 'cmc-thumb');
@@ -618,11 +618,11 @@
         var tr = pendingImgs.filter(function (x) { return x.alpha; }).length;
         nodes.previewMeta.textContent = pendingImgs.length + ' 张 · ' + kb + 'KB' + (tr ? ' · 透明 ' + tr : '');
         nodes.preview.classList.remove('cmc-hidden');
-        // 一张一张加的时候跟到最新；一次选一批就停在开头，按选择顺序看
+        
         nodes.previewStrip.scrollLeft = stickEnd ? nodes.previewStrip.scrollWidth : keepLeft;
     }
 
-    // 支持一次选多张：全部读完再一起落到预览条，避免顺序乱跳
+    
     function addImages(files) {
         var list = Array.prototype.slice.call(files || []).filter(function (f) {
             return /^image\//.test(f.type || '');
@@ -650,7 +650,7 @@
         });
     }
 
-    /* ---------------- @ 提及 ---------------- */
+    
 
     function insertAt() {
         var input = nodes.input;
@@ -665,7 +665,7 @@
         refreshMention();
     }
 
-    // 光标前是不是 "@关键词"
+    
     function currentMentionQuery() {
         var input = nodes.input;
         var pos = input.selectionStart === null ? input.value.length : input.selectionStart;
@@ -765,16 +765,16 @@
         return ids;
     }
 
-    /* ---------------- 发送 ---------------- */
+    
 
     function sys(text, level) {
         msgs.push({ sys: true, text: text, level: level || 'info', ts: Date.now() });
         renderList();
     }
 
-    /* 一条「逻辑消息」= 一个气泡。
-     * 协议一条只能带一张图，所以多图会拆成好几帧；这些帧共用同一个 group 号，
-     * 气泡只建一个，图按顺序往 m.imgs 里堆。 */
+    
+
+
     function newMsg(text, imgs, mentions, group) {
         var reqId = 'r' + (++reqSeq);
         var m = {
@@ -801,7 +801,7 @@
         }, '*');
     }
 
-    // 一帧一帧地回执，气泡状态要等所有帧都发出／回执了才算数
+    
     function syncMsgState(m) {
         var f = m.frames || 1;
         if ((m.failN || 0) > 0) { m.state = 'failed'; return; }
@@ -834,7 +834,7 @@
             return;
         }
 
-        // 多图：一个气泡装全部，底下按顺序拆成几条协议消息发出去
+        
         var gid = 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
         var group = newMsg(text, imgs.map(function (x) { return x.url; }), mentions, gid);
         try {
@@ -846,14 +846,14 @@
         (function step() {
             if (i >= imgs.length) return;
             var first = i === 0;
-            // 文字跟第一张一起发，@ 也只带一次，免得对方被 @ 好几遍
+            
             sendFrame(group, first ? text : '', imgs[i].url, first ? mentions : [], gid, i, imgs.length);
             i++;
             if (i < imgs.length) setTimeout(step, SEND_GAP);
         })();
     }
 
-    /* ---------------- 收消息 ---------------- */
+    
 
     function onMessage(ev) {
         if (ev.source && ev.source !== window) return;
@@ -866,7 +866,7 @@
             return;
         }
         if (d.type === 'CM_IDENTITY') {
-            // 身份每 5 秒会同步一次，没变化就完全不动 DOM（这是之前「一直抖」的另一个来源）
+            
             var idSig = [d.userId || 0, d.name || '',
                 (d.users || []).map(function (u) { return (u.id || 0) + ':' + (u.n || '') + ':' + (u.a || ''); }).join(',')
             ].join('|');
@@ -890,7 +890,7 @@
             if (d.ok) {
                 m.sentN = (m.sentN || 0) + 1;
                 if (ackCredit > 0) {
-                    // 回执已经先到了，直接打勾
+                    
                     ackCredit--;
                     m.ackN = (m.ackN || 0) + 1;
                 } else {
@@ -932,7 +932,7 @@
             var mm = d.m || {};
             if (mm.id && msgs.some(function (x) { return x.id === mm.id; })) return;
 
-            // 同一组的多张图：并到最先到的那条气泡里，按序号排好
+            
             var gid = (typeof mm.gid === 'string' && mm.gid) ? mm.gid : '';
             if (gid) {
                 var host = null;
@@ -966,7 +966,7 @@
             };
             msgs.push(rec);
             renderList();
-            // 面板关着 → 算未读；面板开着但人已经切到别的标签/窗口 → 也算未读（标题会提示）
+            
             if (shouldCountUnread()) {
                 if (isMentionMe(rec)) notifyAt();
                 else {
@@ -986,14 +986,14 @@
         }
     }
 
-    /* 这条消息有没有 @ 到我 */
+    
     function isMentionMe(m) {
         if (!m || m.self || m.sys || !myId) return false;
         if (!Array.isArray(m.mentions) || !m.mentions.length) return false;
         return m.mentions.some(function (id) { return Number(id) === Number(myId); });
     }
 
-    // 面板关着又被人 @：角标直接显示 @，比数字醒目
+    
     function notifyAt() {
         unread++;
         atPending = true;
@@ -1005,19 +1005,19 @@
         applyTitle();
     }
 
-    /* ---------------- 人还在不在这个标签页 ---------------- */
-    /* 切到别的标签（hidden）、切到别的窗口（blur）、最小化，都算「人不在」，这时候来的消息要攒着。 */
+    
+    
     function attended() {
         if (document.hidden || document.visibilityState === 'hidden') return false;
         return pageFocused;
     }
 
-    // 新消息要不要记成未读：面板关着要记；面板开着但人不在这个标签，也要记
+    
     function shouldCountUnread() {
         return !open || !attended();
     }
 
-    // 回到这个标签：面板开着说明消息就在眼前，未读清掉、标题还原（面板关着就继续留着）
+    
     function onBackToPage() {
         if (!attended()) return;
         if (open && unread > 0) {
@@ -1035,10 +1035,10 @@
         window.addEventListener('blur', function () { pageFocused = false; });
     }
 
-    /* ---------------- 标签页标题的未读提示 ---------------- */
-    /* 关着面板收到消息时，把标题改成「（你有n条消息未读）全新源码编辑器 - 搭积木一样有趣的编程工具」，
-       点开面板看一眼就还原。站点自己也会改标题（切作品、切场景），所以每次都从当前标题里剥掉前缀现取，
-       再用 MutationObserver 盯住 <title>，被覆盖了就补回去。 */
+    
+    
+
+
     function siteTitle() {
         var t = String(document.title || '');
         return t.replace(TITLE_RE, '') || TITLE_BASE_DEFAULT;
@@ -1062,10 +1062,10 @@
         } catch (e) {}
     }
 
-    /* ---------------- 渲染 ---------------- */
+    
 
-    /* ---------------- 跟随编辑器主题色 ---------------- */
-    /* Kitten 的 6 套主题会把主色写进 --theme-color-0（"255,120,41" 这种），顶栏背景也是它 */
+    
+    
     var themeKey = '';
 
     function readTint() {
@@ -1078,7 +1078,7 @@
                 if (m) return [+m[1], +m[2], +m[3]];
             } catch (e) {}
         }
-        // 兜底：直接量顶栏背景色
+        
         try {
             var h = document.querySelector('header[class*=header], div[class*=header--], div[class*=header]');
             if (h) {
@@ -1098,14 +1098,37 @@
         var key = rgb.join(',');
         if (key === themeKey) return;
         themeKey = key;
-        var soft = rgb.map(function (c) { return mix(c, 255, .62); });   // 浅一档，做填充
-        var deep = rgb.map(function (c) { return mix(c, 0, .34); });     // 深一档，做文字/描边
+        var soft = rgb.map(function (c) { return mix(c, 255, .62); });   
+        var deep = rgb.map(function (c) { return mix(c, 0, .34); });     
         nodes.root.style.setProperty('--cmc-tint', key);
         nodes.root.style.setProperty('--cmc-tint-soft', soft.join(','));
         nodes.root.style.setProperty('--cmc-tint-deep', deep.join(','));
     }
 
-    /* 作品名以页面顶栏那个输入框为准（join_ack 里的 project_name 可能是旧名或角色名） */
+    var themeTimer = 0;
+    function scheduleTheme() {
+        if (themeTimer) return;
+        themeTimer = setTimeout(function () { themeTimer = 0; applyTheme(); }, 40);
+    }
+
+    function watchTheme() {
+        if (!window.MutationObserver) return;
+        var mo = new MutationObserver(scheduleTheme);
+        try {
+            mo.observe(document.documentElement, {
+                subtree: true, attributes: true, attributeFilter: ['style', 'class']
+            });
+            mo.observe(document.head, {
+                subtree: true, childList: true, characterData: true,
+                attributes: true, attributeFilter: ['href', 'rel', 'media']
+            });
+        } catch (e) {}
+        document.addEventListener('click', scheduleTheme, true);
+        document.addEventListener('visibilitychange', scheduleTheme, true);
+        [0, 120, 400, 1000].forEach(function (t) { setTimeout(applyTheme, t); });
+    }
+
+    
     function readWorkName() {
         try {
             var inp = document.querySelector('input[placeholder="作品名称不能为空"]');
@@ -1113,7 +1136,7 @@
                 var v = inp.value.trim();
                 if (v) return v;
             }
-            // 兜底：占位文案不一定是这句，就找顶栏里第一个像名字的输入框
+            
             var top = document.querySelectorAll('input.CUI-input-common-input');
             for (var i = 0; i < top.length; i++) {
                 var r = top[i].getBoundingClientRect();
@@ -1129,7 +1152,7 @@
         var s, cls;
         var workName = readWorkName() || st.projectName || '';
         if (st.connected && st.actorId) {
-            // 房间名 + 房间号：作品名可能重名，括号里的 work_id 才是唯一标识
+            
             var rid = st.roomId ? String(st.roomId) : '';
             var rname = workName || '房间';
             s = '已连接 · ' + rname + (rid ? '（' + rid + '）' : '');
@@ -1166,16 +1189,16 @@
         nodes.me.title = myId ? ('协作 id：' + myId + (myName ? ' · ' + myName : '')) : '正在获取协作身份…';
     }
 
-    /* ---------------- 列表：增量渲染 ----------------
-     * 以前是「清空 + 重建」，收到任何广播（比如每 5 秒的身份同步）都会把所有气泡重建一遍，
-     * 入场动画跟着重放，看起来就是一直在抖。现在按 key 复用节点：
-     *   - 新消息只 append
-     *   - 状态变化（发送中 → 已打勾）只替换那一条
-     *   - 其它情况一律不动 DOM
-     */
+    
+
+
+
+
+
+
     var lastIdSig = '';
-    var rowMap = {};           // key → 节点
-    var rowSig = {};           // key → 渲染签名（变了才重建那一条）
+    var rowMap = {};           
+    var rowSig = {};           
 
     function keyOf(m, i) {
         if (m.sys) return 'sys#' + i;
@@ -1212,7 +1235,7 @@
         }
         wrap.appendChild(meta);
 
-        // 一次连发的多张图全部装在这一个气泡里
+        
         var urls = m.imgs && m.imgs.length ? m.imgs : (m.img ? [m.img] : []);
         if (urls.length) {
             var n = urls.length;
@@ -1227,7 +1250,7 @@
                     nodes.bigImg.src = u;
                     nodes.lightbox.classList.remove('cmc-hidden');
                 });
-                // 图还没加载完时高度为 0，加载后会把列表顶起来，这时要重新贴底
+                
                 im.addEventListener('load', function () {
                     if (stickBottom && nodes.list) nodes.list.scrollTop = nodes.list.scrollHeight;
                 });
@@ -1253,7 +1276,7 @@
         var list = nodes.list;
         var h0 = list.scrollHeight;
 
-        // 1) 删掉已经不在窗口里的
+        
         var wanted = {};
         var i, m, key;
         for (i = 0; i < slice.length; i++) wanted[keyOf(slice[i], base + i)] = 1;
@@ -1265,7 +1288,7 @@
             }
         });
 
-        // 2) 追加新消息 / 状态变了就只换那一条
+        
         var appended = false, mineAppended = false;
         for (i = 0; i < slice.length; i++) {
             m = slice[i];
@@ -1277,14 +1300,14 @@
             if (!rowMap[key]) {
                 var node = buildRow(m, atMe);
                 node.setAttribute('data-key', key);
-                if (!m.sys) node.classList.add('cmc-row-in');    // 只有新消息才播入场动画
+                if (!m.sys) node.classList.add('cmc-row-in');    
                 nodes.list.appendChild(node);
                 rowMap[key] = node;
                 rowSig[key] = sig;
                 appended = true;
                 if (!m.sys && m.self) mineAppended = true;
             } else if (rowSig[key] !== sig) {
-                var fresh = buildRow(m, atMe);                  // 原地替换，不带动画
+                var fresh = buildRow(m, atMe);                  
                 fresh.setAttribute('data-key', key);
                 nodes.list.replaceChild(fresh, rowMap[key]);
                 rowMap[key] = fresh;
@@ -1292,7 +1315,7 @@
             }
         }
 
-        // 高度变了（新消息、或者同组又并进来一张图）就重新贴底；用户翻在上面时不打扰
+        
         var grew = list.scrollHeight !== h0;
         if ((stickBottom && (appended || grew)) || mineAppended) {
             nodes.list.scrollTop = nodes.list.scrollHeight;
@@ -1307,7 +1330,7 @@
         }
     }
 
-    /* ---------------- @ 跳转 ---------------- */
+    
 
     function atList() {
         var out = [];
@@ -1325,7 +1348,7 @@
         if (nodes.panel) nodes.panel.classList.remove('cmc-jump-on');
     }
 
-    // 最近一条 @ 我的消息不在视野里 → 冒出「↑ 谁 @ 了你」
+    
     function updateAtJump() {
         if (!nodes.jump) return;
         if (!open || !nodes.list || !myId || pendingImgs.length) { hideJump(); return; }
@@ -1351,7 +1374,7 @@
         nodes.jumpTxt.textContent = target.name + ' @ 了你';
         nodes.jump.classList.toggle('cmc-jump-down', nr.top > lr.bottom - 4);
         nodes.jump.classList.remove('cmc-hidden');
-        // 给列表底部留一条缝，别让按钮压住最后一条消息
+        
         nodes.panel.classList.add('cmc-jump-on');
         if (stickBottom) nodes.list.scrollTop = nodes.list.scrollHeight;
     }
@@ -1366,12 +1389,12 @@
         var lr = nodes.list.getBoundingClientRect();
         var nr = node.getBoundingClientRect();
         var top = nodes.list.scrollTop + (nr.top - lr.top) - Math.max(0, (lr.height - nr.height) / 2);
-        // 跳过去看历史时别再被新消息拽回底部
+        
         stickBottom = false;
         if (window.__cmUiDebug) window.__cmUiDebug.lastJump = { key: key, from: nodes.list.scrollTop, to: top, h: nr.height };
         try { nodes.list.scrollTo({ top: top, behavior: 'smooth' }); }
         catch (e) { nodes.list.scrollTop = top; }
-        // 兜底：页面不可见（无头 / 后台标签）时浏览器会冻结平滑滚动，420ms 后还没到位就直接落位
+        
         clearTimeout(jumpFallbackT);
         jumpFallbackT = setTimeout(function () {
             if (Math.abs(nodes.list.scrollTop - top) > 4) nodes.list.scrollTop = top;
@@ -1390,14 +1413,14 @@
     function start() {
         build();
         applyTheme();
-        setInterval(applyTheme, 2000);
-        watchTitle();          // 站点的标题随时会变，盯着补回未读前缀
-        watchPage();           // 切标签/切窗口回来的那一刻，把面板里的未读清掉
+        watchTheme();
+        watchTitle();
+        watchPage();
         setTimeout(ping, 300);
         setTimeout(ping, 1200);
         setInterval(ping, 5000);
 
-        // 作品名在顶栏输入框里，用户改名后状态行要跟着变
+        
         var lastWork = readWorkName();
         setInterval(function () {
             var now = readWorkName();
