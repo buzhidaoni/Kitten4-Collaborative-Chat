@@ -18,7 +18,7 @@
     if (window.__cmChatInstalled) return;
     window.__cmChatInstalled = true;
 
-    var VERSION = '3.6';
+    var VERSION = '3.8';
     var PREFIX = '#%^&114514*/n';     
     var COLLAB_HOST = 'socketcoll.codemao.cn';
     var COMMENT_LOCATION = [100, 100]; 
@@ -123,11 +123,6 @@
             identity();
         }
     }
-    function log() {
-        try { console.log.apply(console, ['%c[无痕聊天]', 'color:#0a84ff;font-weight:bold'].concat([].slice.call(arguments))); } catch (e) {}
-    }
-
-    
 
     function parseFrame(raw) {
         if (typeof raw !== 'string' || raw.charAt(0) !== '4' || raw.charAt(1) !== '2') return null;
@@ -346,7 +341,6 @@
             var uid = Number(body.u) || 0;
             var known = uid && state.users[uid] ? state.users[uid].n : '';
             var nick = known || String(body.n || '对方');
-            log('📩', nick + ': ' + body.t);
             var img = typeof body.img === 'string' && /^data:image\/(png|jpeg|jpg|webp);base64,[A-Za-z0-9+/=]+$/.test(body.img)
                 ? body.img : '';
             var mentions = Array.isArray(body.mentions)
@@ -425,7 +419,6 @@
             });
             if (!found.length) return;
             state.legacyFound = found.length;
-            log('🧹 发现 ' + found.length + ' 条历史残留，稍后清理');
             found.slice(0, 12).forEach(function (item, i) {
                 setTimeout(function () {
                     try {
@@ -505,17 +498,9 @@
             sendCommand(cmd);
 
             state.msgOut++;
-            
-            var sentBits = [];
-            if (text) sentBits.push(text.length > 30 ? ('「' + text.slice(0, 30) + '…」') : ('「' + text + '」'));
-            if (img) sentBits.push('图片 ' + Math.max(1, Math.round(img.length / 1024)) + 'KB');
-            if (body.g) sentBits.push('组 ' + body.g + ' ' + ((body.gi || 0) + 1) + '/' + body.gt);
-            if (body.mentions) sentBits.push('@' + body.mentions.join(','));
-            log('📤 已发送 ' + cid.slice(-5), sentBits.join(' · ') || '「空」');
             toUI({ type: 'CM_SENT', reqId: reqId, ok: true, cid: cid });
             status();
 
-            
             var burn = function (attempt) {
                 return function () {
                     var wait = 300 - (Date.now() - (state.lastAppOpAt || 0));
@@ -530,7 +515,6 @@
             setTimeout(burn(0), KEEP_MS);
         } catch (e) {
             state.lastError = e.message;
-            log('⚠️ 发送失败', e.message);
             toUI({ type: 'CM_SENT', reqId: reqId, ok: false, error: e.message });
         }
     }
@@ -550,10 +534,10 @@
             if (block) ev.stopImmediatePropagation();   
         });
         ws.addEventListener('open', function () {
-            state.connected = true; log('🔌 协作连接已打开'); status();
+            state.connected = true; status();
         });
         ws.addEventListener('close', function () {
-            state.connected = false; log('🔌 协作连接已关闭'); status();
+            state.connected = false; status();
         });
 
         
@@ -574,7 +558,6 @@
             };
         } catch (e) {}
 
-        log('✅ 已接管协作连接' + (state.roomId ? '（房间 ' + state.roomId + '）' : ''));
         status();
     }
 
@@ -610,5 +593,4 @@
         else if (d.type === 'CM_PING') { status(); identity(); }
     });
 
-    log('v' + VERSION + ' 已就绪，暗号 ' + PREFIX.replace(/\n/g, '\\n'));
 })();

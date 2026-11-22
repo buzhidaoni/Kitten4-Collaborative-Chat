@@ -70,17 +70,6 @@
     }
     function pad(n) { return (n < 10 ? '0' : '') + n; }
     
-    function sendLog(reqId, text, img, mentions, group, gi, gt) {
-        try {
-            if (!console || !console.log) return;
-            var bits = [reqId];
-            if (text) bits.push(text.length > 24 ? ('「' + text.slice(0, 24) + '…」') : ('「' + text + '」'));
-            if (img) bits.push('图片 ' + Math.max(1, Math.round(String(img).length / 1024)) + 'KB');
-            if (gt > 1) bits.push('组 ' + group + ' ' + (gi + 1) + '/' + gt);
-            if (mentions && mentions.length) bits.push('@' + mentions.join(','));
-            console.log('%c[协作聊天] ↑ 发送', 'color:#1d6df0;font-weight:700', bits.join(' · '));
-        } catch (e) {}
-    }
     function hhmmss(ts) {
         var d = new Date(ts || Date.now());
         return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
@@ -793,7 +782,6 @@
         var reqId = 'r' + (++reqSeq);
         m.frames = Math.max(1, gt || 1);
         pendingSend[reqId] = m;
-        sendLog(reqId, text, img, mentions, group, gi || 0, gt || 1);
         window.postMessage({
             type: 'CM_SEND', text: text, nickname: myName, reqId: reqId,
             img: img, mentions: mentions || [],
@@ -837,11 +825,6 @@
         
         var gid = 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
         var group = newMsg(text, imgs.map(function (x) { return x.url; }), mentions, gid);
-        try {
-            console.log('%c[协作聊天] ↑ 一次发 ' + imgs.length + ' 张图', 'color:#1d6df0;font-weight:700',
-                '组 ' + gid + ' · 每 ' + SEND_GAP + 'ms 一帧 · 拼成同一个气泡');
-        } catch (e) {}
-
         var i = 0;
         (function step() {
             if (i >= imgs.length) return;
