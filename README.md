@@ -1,10 +1,11 @@
 # Kitten4 协作聊天
 
-![version](https://img.shields.io/badge/version-3.5-ff7829)
+![version](https://img.shields.io/badge/version-3.6-ff7829)
 ![manifest](https://img.shields.io/badge/manifest-v3-4285f4)
 ![chrome](https://img.shields.io/badge/Chrome%20%2F%20Edge-111%2B-34a853)
 ![tests](https://img.shields.io/badge/tests-72%20%2B%2066%20passed-27b56a)
 
+所有代码皆为AI（DeepSeek-V4.1-flash）生成，如有bug，也请见谅，并联系我Q：2971396812
 该项目仅在github发布，其他平台皆为盗版，盗版可以会被植入恶意代码，如果被盗号、毁号，该项目部承担任何责任，请在github下载并使用
 
 ## 这是什么
