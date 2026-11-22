@@ -18,7 +18,7 @@
     if (window.__cmChatInstalled) return;
     window.__cmChatInstalled = true;
 
-    var VERSION = '3.8';
+    var VERSION = '4.0';
     var PREFIX = '#%^&114514*/n';     
     var COLLAB_HOST = 'socketcoll.codemao.cn';
     var COMMENT_LOCATION = [100, 100]; 

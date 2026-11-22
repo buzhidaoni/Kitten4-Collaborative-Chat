@@ -252,7 +252,21 @@
         badge.id = 'cmc-badge';
         btn.appendChild(badge);
 
-        
+        var tip = el('div', 'cmc-refresh-tip cmc-hidden');
+        tip.id = 'cmc-refresh-tip';
+        var tipText = el('span', 'cmc-refresh-tip-text', '刷新页面后启用聊天');
+        tipText.id = 'cmc-refresh-tip-text';
+        var tipBtn = el('button', 'cmc-refresh-tip-btn', '刷新页面');
+        tipBtn.id = 'cmc-refresh-tip-btn';
+        tipBtn.type = 'button';
+        var tipClose = el('button', 'cmc-refresh-tip-close', '×');
+        tipClose.id = 'cmc-refresh-tip-close';
+        tipClose.type = 'button';
+        tipClose.title = '知道了';
+        tip.appendChild(tipText);
+        tip.appendChild(tipBtn);
+        tip.appendChild(tipClose);
+
         var lightbox = el('div', 'cmc-lightbox cmc-hidden');
         lightbox.id = 'cmc-lightbox';
         var bigImg = document.createElement('img');
@@ -261,6 +275,7 @@
 
         root.appendChild(panel);
         root.appendChild(btn);
+        root.appendChild(tip);
         root.appendChild(lightbox);
         document.documentElement.appendChild(root);
 
@@ -271,10 +286,12 @@
             menu: menu, atBtn: atBtn, imgBtn: imgBtn, file: file,
             empty: empty,
             jump: jump, jumpTxt: jumpTxt,
+            tip: tip, tipText: tipText, tipBtn: tipBtn, tipClose: tipClose,
             lightbox: lightbox, bigImg: bigImg
         };
         bind();
         loadPos();
+        maybeShowReloadTip();
         renderStatus();
         renderList();
         renderIdentity();
@@ -339,10 +356,47 @@
             updateAtJump();
         });
 
+        nodes.tipBtn.addEventListener('click', function () {
+            try { if (chrome && chrome.storage && chrome.storage.local) chrome.storage.local.remove('cmcNeedReloadAt'); } catch (e) {}
+            location.reload();
+        });
+        nodes.tipClose.addEventListener('click', function () {
+            nodes.tip.classList.add('cmc-hidden');
+            nodes.root.classList.remove('cmc-need-reload');
+        });
+
         window.addEventListener('message', onMessage);
     }
 
-    
+    function maybeShowReloadTip() {
+        if (!nodes.tip) return;
+        try {
+            if (!chrome || !chrome.storage || !chrome.storage.local) return;
+        } catch (e) { return; }
+        chrome.storage.local.get('cmcNeedReloadAt', function (data) {
+            var t = data && data.cmcNeedReloadAt;
+            if (typeof t !== 'number') return;
+            var origin = (window.performance && performance.timeOrigin) ? performance.timeOrigin : Date.now();
+            if (origin >= t) return;
+            nodes.tip.classList.remove('cmc-hidden');
+            nodes.root.classList.add('cmc-need-reload');
+            placeTip();
+        });
+    }
+
+    function placeTip() {
+        if (!nodes.tip || nodes.tip.classList.contains('cmc-hidden')) return;
+        var v = viewport(), s = ballSize();
+        var x = pos ? pos.x : 0, y = pos ? pos.y : 0;
+        var tw = nodes.tip.offsetWidth || 280;
+        var th = nodes.tip.offsetHeight || 44;
+        var toRight = (x + s / 2) > v.w / 2;
+        var down = (y - th - 58) < 8;
+        nodes.tip.classList.toggle('cmc-tip-right', toRight);
+        nodes.tip.classList.toggle('cmc-tip-down', down);
+        var room = toRight ? x + s - 8 : v.w - x - 8;
+        nodes.tip.style.maxWidth = Math.max(180, Math.min(300, room)) + 'px';
+    }
 
     function viewport() {
         return { w: window.innerWidth || document.documentElement.clientWidth || 360,
@@ -372,6 +426,7 @@
         nodes.root.style.top = Math.round(pos.y) + 'px';
         nodes.root.style.bottom = 'auto';
         placePanel();
+        placeTip();
     }
 
     

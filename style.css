@@ -153,6 +153,88 @@
 }
 .cmc-hidden { display: none !important; }
 
+.cmc-root.cmc-off.cmc-need-reload {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    pointer-events: auto;
+    transition: opacity .24s ease, transform .28s ease;
+}
+
+.cmc-refresh-tip {
+    position: absolute;
+    left: 0;
+    bottom: 58px;
+    width: max-content;
+    max-width: 300px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 9px 10px 9px 12px;
+    border-radius: 15px;
+    border: 1px solid rgba(255, 255, 255, .8);
+    background: rgba(255, 255, 255, .32);
+    -webkit-backdrop-filter: blur(32px) brightness(1.05);
+    backdrop-filter: blur(32px) brightness(1.05);
+    box-shadow:
+        0 0 0 1px rgba(37, 37, 37, .05),
+        0 18px 40px -20px rgba(41, 41, 41, .45),
+        inset 0 1px 0 rgba(255, 255, 255, .9);
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--cmc-ink);
+    animation: cmc-tip-in .3s cubic-bezier(.22, 1, .3, 1.3) both;
+}
+.cmc-refresh-tip::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: rgba(var(--cmc-tint), .09);
+}
+.cmc-refresh-tip.cmc-tip-right { left: auto; right: 0; }
+.cmc-refresh-tip.cmc-tip-down { bottom: auto; top: 58px; }
+.cmc-refresh-tip-text {
+    position: relative;
+    flex: 1 1 auto;
+    white-space: nowrap;
+}
+.cmc-refresh-tip-btn {
+    position: relative;
+    flex: 0 0 auto;
+    padding: 5px 11px;
+    border: 1px solid rgba(255, 255, 255, .7);
+    border-radius: 9px;
+    background: rgba(var(--cmc-tint-soft), .82);
+    color: rgb(var(--cmc-tint-deep));
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.4;
+    cursor: pointer;
+}
+.cmc-refresh-tip-btn:hover { background: rgba(var(--cmc-tint-soft), .96); }
+.cmc-refresh-tip-close {
+    position: relative;
+    flex: 0 0 auto;
+    width: 20px;
+    height: 20px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: rgba(0, 0, 0, .05);
+    color: var(--cmc-dim);
+    font-family: inherit;
+    font-size: 14px;
+    line-height: 1;
+    cursor: pointer;
+}
+@keyframes cmc-tip-in {
+    from { opacity: 0; transform: translateY(6px) scale(.96); }
+    to { opacity: 1; transform: none; }
+}
+
 
 
 .cmc-panel {
