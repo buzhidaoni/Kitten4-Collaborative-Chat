@@ -1,6 +1,6 @@
 # Kitten4 协作聊天
 
-![version](https://img.shields.io/badge/version-3.5-ff7829)
+![version](https://img.shields.io/badge/version-3.8-ff7829)
 ![manifest](https://img.shields.io/badge/manifest-v3-4285f4)
 ![chrome](https://img.shields.io/badge/Chrome%20%2F%20Edge-111%2B-34a853)
 ![tests](https://img.shields.io/badge/tests-72%20%2B%2066%20passed-27b56a)
