@@ -1,0 +1,1414 @@
+/* ============================================================================
+ * Kitten4 协作聊天（Kitten4-Collaborative-Chat）  UI（隔离世界）
+ * 只负责界面；收发全部通过 postMessage 交给 inject.js
+ *  - CM_SEND     → 请求发送（text / img / mentions）
+ *  - CM_SENT     → 发送结果（ok / error）
+ *  - CM_ACK      → 服务器 operation_ack（code=1 即已接收）
+ *  - CM_RECEIVE  → 收到别人的消息（含头像 / 图片 / @）
+ *  - CM_STATUS   → 连接 / 房间 / 作品名
+ *  - CM_IDENTITY → 我的协作 id + 站内昵称 + 在线成员（含头像）
+ * ==========================================================================*/
+(function () {
+    'use strict';
+    if (window.__cmChatUI) return;
+
+    // 只在编辑器首页启用（作品页、社区页都不跑）；file:// 留给本地测试
+    var IS_EDITOR = (location.host === 'kitten4.codemao.cn' && location.pathname === '/');
+    if (!IS_EDITOR && location.protocol !== 'file:') return;
+
+    window.__cmChatUI = true;
+
+    var myId = null;
+    var myName = '';
+    var myAvatar = '';
+    var users = [];            // [{id,n,a}]
+
+    var st = {
+        connected: false, roomId: null, projectName: '', actorId: null,
+        msgIn: 0, msgOut: 0, acks: 0, lastError: null, revision: 0
+    };
+    var msgs = [];
+    var reqSeq = 0;
+    var pendingSend = {};      // reqId -> msg
+    var waitingAck = [];       // 等待服务器回执的消息（FIFO）
+    var ackCredit = 0;         // 回执比「发送成功」先到时的欠条（网络快的时候真会发生）
+    var unread = 0;
+    var atPending = false;     // 关着面板时被 @ 过（角标显示 @，不被普通消息覆盖）
+    var pageFocused = true;    // 这个标签/窗口在不在眼前（切窗口会失焦，切标签会 hidden）
+    var TITLE_BASE_DEFAULT = '全新源码编辑器 - 搭积木一样有趣的编程工具';
+    var TITLE_RE = /^（你有\d+条消息未读）/;   // 我们自己加在标题前面的那段
+    var nodes = {};
+    var open = false;
+    var hideTimer = null;
+    var pendingImgs = [];      // 待发送图片（可多张，{url,w,h,kb}）
+    var MAX_IMGS = 9;          // 一次最多选多少张
+    var SEND_GAP = 600;        // 多图分条发送的间隔（ms）
+    var mention = { open: false, items: [], index: 0 };
+
+    /* 悬浮球位置（苹果「辅助触控」那种：可拖动、松手贴边、位置记住） */
+    var POS_KEY = 'cmc.pos.v1';
+    var pos = null;            // {x,y} 球左上角的视口坐标
+    var dragStart = null;      // 拖拽起点
+    var dragMoved = 0;
+    var suppressClick = false; // 拖完那一下不要把面板点开／关掉
+    var dragRaf = 0;
+
+    /* @ 跳转：消息滚出视野时冒出来的小按钮 */
+    var atSeen = {};           // 已经跳过去看过的 @ 消息
+    var jumpKey = '';          // 当前按钮指向的那条消息
+    var jumpFallbackT = 0;     // 平滑滚动的兜底定时器
+    var scrollRaf = 0;
+    var stickBottom = true;    // 是不是「贴着底部」（用户往上翻时就变成 false）
+
+    window.__cmUiDebug = { clicks: 0, opens: 0, closes: 0 };
+
+    function el(tag, cls, text) {
+        var n = document.createElement(tag);
+        if (cls) n.className = cls;
+        if (text !== undefined && text !== null) n.textContent = text;
+        return n;
+    }
+    function pad(n) { return (n < 10 ? '0' : '') + n; }
+    /* 控制台发送日志：一条协议帧一行，便于排查「到底发出去了什么」 */
+    function sendLog(reqId, text, img, mentions, group, gi, gt) {
+        try {
+            if (!console || !console.log) return;
+            var bits = [reqId];
+            if (text) bits.push(text.length > 24 ? ('「' + text.slice(0, 24) + '…」') : ('「' + text + '」'));
+            if (img) bits.push('图片 ' + Math.max(1, Math.round(String(img).length / 1024)) + 'KB');
+            if (gt > 1) bits.push('组 ' + group + ' ' + (gi + 1) + '/' + gt);
+            if (mentions && mentions.length) bits.push('@' + mentions.join(','));
+            console.log('%c[协作聊天] ↑ 发送', 'color:#1d6df0;font-weight:700', bits.join(' · '));
+        } catch (e) {}
+    }
+    function hhmmss(ts) {
+        var d = new Date(ts || Date.now());
+        return pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+    }
+    function label(name, id) {
+        var n = name || '协作成员';
+        return id ? n + ' #' + id : n;
+    }
+    function nameWithId(name, id) {
+        var frag = document.createDocumentFragment();
+        frag.appendChild(el('span', 'cmc-name', name || '协作成员'));
+        if (id) frag.appendChild(el('span', 'cmc-uid', '#' + id));
+        return frag;
+    }
+    function findUser(id) {
+        if (!id) return null;
+        for (var i = 0; i < users.length; i++) if (Number(users[i].id) === Number(id)) return users[i];
+        return null;
+    }
+    function initial(name) {
+        var s = String(name || '?').trim();
+        return s ? s.slice(0, 1).toUpperCase() : '?';
+    }
+    function avatarNode(name, id, url, small) {
+        var box = el('div', 'cmc-ava' + (small ? ' cmc-ava-sm' : ''));
+        if (url) {
+            var img = document.createElement('img');
+            img.src = url;
+            img.alt = '';
+            img.referrerPolicy = 'no-referrer';
+            box.appendChild(img);
+        } else {
+            // 没有头像地址：留一个中性玻璃方块，只放首字，不上色
+            box.appendChild(el('span', 'cmc-ava-txt', initial(name)));
+        }
+        return box;
+    }
+
+    /* ---------------- 构建界面 ---------------- */
+
+    var ICON_AT = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">' +
+        '<circle cx="12" cy="12" r="4.1"/><path d="M16.1 12v1.4a2.5 2.5 0 0 0 5 0V12a9.1 9.1 0 1 0-3.4 7.1"/></svg>';
+    var ICON_IMG = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">' +
+        '<rect x="3.4" y="4.6" width="17.2" height="14.8" rx="3.4"/><circle cx="9" cy="10" r="1.6" fill="currentColor" stroke="none"/>' +
+        '<path d="M4.6 17.4 9.8 13l3.3 3 2.5-2.2 3.8 3.6"/></svg>';
+
+    function build() {
+        if (document.getElementById('cmc-root')) return;
+        if (!document.documentElement) return;
+
+        var root = el('div', 'cmc-root cmc-off');
+        root.id = 'cmc-root';
+
+        var panel = el('div', 'cmc-panel cmc-hidden');
+        panel.id = 'cmc-panel';
+
+        var head = el('div', 'cmc-head');
+        var title = el('div', 'cmc-title');
+        var dot = el('span', 'cmc-dot');
+        dot.id = 'cmc-dot';
+        title.appendChild(dot);
+        title.appendChild(el('span', 'cmc-title-txt', 'Kitten4 协作聊天'));
+        var me = el('span', 'cmc-me', '协作成员');
+        me.id = 'cmc-me';
+        me.title = '我的协作身份';
+        title.appendChild(me);
+        head.appendChild(title);
+        panel.appendChild(head);
+
+        var bar = el('div', 'cmc-bar', '等待协作连接…');
+        bar.id = 'cmc-bar';
+        panel.appendChild(bar);
+
+        var list = el('div', 'cmc-list');
+        list.id = 'cmc-list';
+        // 空态：面板打开但还没有任何消息时，别给一块空白玻璃
+        var empty = el('div', 'cmc-empty');
+        empty.id = 'cmc-empty';
+        empty.appendChild(el('div', 'cmc-empty-t', '还没有消息'));
+        list.appendChild(empty);
+        panel.appendChild(list);
+
+        // 图片预览条
+        var preview = el('div', 'cmc-preview cmc-hidden');
+        preview.id = 'cmc-preview';
+        var previewStrip = el('div', 'cmc-preview-strip');
+        previewStrip.id = 'cmc-preview-strip';
+        var previewMeta = el('div', 'cmc-preview-meta');
+        previewMeta.id = 'cmc-preview-meta';
+        var previewX = el('button', 'cmc-preview-x', '×');
+        previewX.title = '全部取消';
+        previewX.type = 'button';
+        preview.appendChild(previewStrip);
+        preview.appendChild(previewMeta);
+        preview.appendChild(previewX);
+        panel.appendChild(preview);
+
+        // @ 候选列表
+        var menu = el('div', 'cmc-mention cmc-hidden');
+        menu.id = 'cmc-mention';
+        panel.appendChild(menu);
+
+        // 「有人 @ 你，但那条消息滚上去了」时的跳转按钮
+        var jump = el('button', 'cmc-jump cmc-hidden');
+        jump.id = 'cmc-jump';
+        jump.type = 'button';
+        jump.title = '跳到被 @ 的那条消息';
+        jump.appendChild(el('span', 'cmc-jump-dot'));
+        var jumpTxt = el('span', 'cmc-jump-txt', '');
+        jumpTxt.id = 'cmc-jump-txt';
+        jump.appendChild(jumpTxt);
+        var jumpGo = el('span', 'cmc-jump-go');
+        jumpGo.innerHTML =
+            '<svg viewBox="0 0 24 24" width="12" height="12" fill="none" stroke="currentColor" ' +
+            'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+            '<path d="M12 19.5V5M5.2 11.6 12 4.8l6.8 6.8"/></svg>';
+        jump.appendChild(jumpGo);
+        panel.appendChild(jump);
+
+        var inputArea = el('div', 'cmc-input-area');
+
+        var atBtn = el('button', 'cmc-icon-btn');
+        atBtn.id = 'cmc-at';
+        atBtn.type = 'button';
+        atBtn.title = '提及成员';
+        atBtn.innerHTML = ICON_AT;
+
+        var imgBtn = el('button', 'cmc-icon-btn');
+        imgBtn.id = 'cmc-img';
+        imgBtn.type = 'button';
+        imgBtn.title = '发送图片';
+        imgBtn.innerHTML = ICON_IMG;
+
+        var input = document.createElement('input');
+        input.type = 'text';
+        input.id = 'cmc-input';
+        input.maxLength = 300;
+        input.placeholder = '说点什么…';
+
+        var sendBtn = el('button', 'cmc-send', '发送');
+        sendBtn.id = 'cmc-send';
+
+        inputArea.appendChild(atBtn);
+        inputArea.appendChild(imgBtn);
+        inputArea.appendChild(input);
+        inputArea.appendChild(sendBtn);
+        panel.appendChild(inputArea);
+
+        var file = document.createElement('input');
+        file.type = 'file';
+        file.accept = 'image/png,image/jpeg,image/webp,image/gif';
+        file.multiple = true;
+        file.id = 'cmc-file';
+        file.className = 'cmc-file';
+        panel.appendChild(file);
+
+        var btn = el('div', 'cmc-btn');
+        btn.id = 'cmc-btn';
+        btn.title = 'Kitten4 协作聊天';
+        btn.setAttribute('role', 'button');
+        btn.setAttribute('aria-expanded', 'false');
+
+        var icon = el('span', 'cmc-btn-icon');
+        icon.innerHTML =
+            '<svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">' +
+            '<path d="M12 4.2c-4.4 0-8 2.9-8 6.5 0 2 1.1 3.9 2.9 5.1l-.7 2.9c-.1.4.3.6.6.4l3-1.6c.7.2 1.4.3 2.2.3 4.4 0 8-2.9 8-6.5s-3.6-6.6-8-6.6z" ' +
+            'fill="currentColor" opacity=".9"/>' +
+            '<circle cx="8.9" cy="10.7" r="1" fill="#fff" opacity=".92"/>' +
+            '<circle cx="12" cy="10.7" r="1" fill="#fff" opacity=".92"/>' +
+            '<circle cx="15.1" cy="10.7" r="1" fill="#fff" opacity=".92"/></svg>';
+        var chevron = el('span', 'cmc-btn-chevron');
+        chevron.innerHTML =
+            '<svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">' +
+            '<path d="M6.5 9.5 12 15l5.5-5.5" fill="none" stroke="currentColor" stroke-width="2" ' +
+            'stroke-linecap="round" stroke-linejoin="round"/></svg>';
+        btn.appendChild(icon);
+        btn.appendChild(chevron);
+
+        var badge = el('span', 'cmc-badge cmc-hidden');
+        badge.id = 'cmc-badge';
+        btn.appendChild(badge);
+
+        // 看大图
+        var lightbox = el('div', 'cmc-lightbox cmc-hidden');
+        lightbox.id = 'cmc-lightbox';
+        var bigImg = document.createElement('img');
+        bigImg.alt = '';
+        lightbox.appendChild(bigImg);
+
+        root.appendChild(panel);
+        root.appendChild(btn);
+        root.appendChild(lightbox);
+        document.documentElement.appendChild(root);
+
+        nodes = {
+            root: root, panel: panel, list: list, input: input, sendBtn: sendBtn,
+            bar: bar, dot: dot, me: me, btn: btn, badge: badge, icon: icon, chevron: chevron,
+            preview: preview, previewStrip: previewStrip, previewMeta: previewMeta, previewX: previewX,
+            menu: menu, atBtn: atBtn, imgBtn: imgBtn, file: file,
+            empty: empty,
+            jump: jump, jumpTxt: jumpTxt,
+            lightbox: lightbox, bigImg: bigImg
+        };
+        bind();
+        loadPos();
+        renderStatus();
+        renderList();
+        renderIdentity();
+    }
+
+    function bind() {
+        nodes.btn.addEventListener('click', function () {
+            if (suppressClick) { suppressClick = false; return; }   // 刚刚是拖拽，不是点击
+            var dbg = window.__cmUiDebug;
+            if (dbg) { dbg.clicks++; dbg.lastClickConnected = !!st.connected; dbg.lastClickOpen = open; }
+            if (!st.connected) return;
+            setOpen(!open);
+        });
+        nodes.btn.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter' && e.key !== ' ') return;
+            e.preventDefault();
+            if (st.connected) setOpen(!open);
+        });
+
+        // 拖动悬浮球（鼠标 + 触摸都用 pointer 事件）
+        nodes.btn.addEventListener('pointerdown', onDragStart);
+        nodes.btn.addEventListener('pointermove', onDragMove);
+        nodes.btn.addEventListener('pointerup', onDragEnd);
+        nodes.btn.addEventListener('pointercancel', onDragEnd);
+
+        nodes.jump.addEventListener('click', jumpToAt);
+
+
+        nodes.input.addEventListener('keydown', onInputKey);
+        nodes.input.addEventListener('input', function () { refreshMention(); });
+        nodes.sendBtn.addEventListener('click', doSend);
+
+        nodes.atBtn.addEventListener('click', function (e) {
+            e.preventDefault();
+            insertAt();
+        });
+        nodes.imgBtn.addEventListener('click', function () { nodes.file.click(); });
+        nodes.file.addEventListener('change', function () {
+            var picked = nodes.file.files ? Array.prototype.slice.call(nodes.file.files) : [];
+            nodes.file.value = '';          // 清空，允许连续选同一批文件
+            if (picked.length) addImages(picked);
+        });
+        nodes.previewX.addEventListener('click', clearImage);
+        nodes.lightbox.addEventListener('click', function () { nodes.lightbox.classList.add('cmc-hidden'); });
+
+        // 点面板空白处收起 @ 列表
+        nodes.panel.addEventListener('mousedown', function (e) {
+            if (!mention.open) return;
+            if (nodes.menu.contains(e.target) || nodes.atBtn.contains(e.target)) return;
+            closeMention();
+        });
+
+        nodes.list.addEventListener('scroll', function () {
+            stickBottom = (nodes.list.scrollHeight - nodes.list.scrollTop - nodes.list.clientHeight) < 28;
+            if (scrollRaf) return;
+            scrollRaf = requestAnimationFrame(function () { scrollRaf = 0; updateAtJump(); });
+        });
+
+        window.addEventListener('resize', function () {
+            if (pos) applyPos(pos.x, pos.y, false);
+            placePanel();
+            updateAtJump();
+        });
+
+        window.addEventListener('message', onMessage);
+    }
+
+    /* ---------------- 悬浮球位置 / 拖动 ---------------- */
+
+    function viewport() {
+        return { w: window.innerWidth || document.documentElement.clientWidth || 360,
+                 h: window.innerHeight || document.documentElement.clientHeight || 640 };
+    }
+    function ballSize() {
+        return (nodes.btn && nodes.btn.offsetWidth) || 44;
+    }
+    function clampPos(x, y) {
+        var v = viewport(), s = ballSize(), m = 10;
+        return {
+            x: Math.min(Math.max(m, x), Math.max(m, v.w - s - m)),
+            y: Math.min(Math.max(m, y), Math.max(m, v.h - s - m))
+        };
+    }
+
+    // animate=true 时让 left/top 走一段过渡（松手贴边那一下）
+    function applyPos(x, y, animate) {
+        if (!nodes.root) return;
+        pos = clampPos(x, y);
+        if (animate) {
+            nodes.root.classList.add('cmc-anim');
+            clearTimeout(applyPos.t);
+            applyPos.t = setTimeout(function () { nodes.root.classList.remove('cmc-anim'); }, 380);
+        }
+        nodes.root.style.left = Math.round(pos.x) + 'px';
+        nodes.root.style.top = Math.round(pos.y) + 'px';
+        nodes.root.style.bottom = 'auto';
+        placePanel();
+    }
+
+    // 面板：球在右半边就钉右边，上方空间不够就往下翻
+    function placePanel() {
+        if (!nodes.panel) return;
+        var v = viewport(), s = ballSize();
+        var ph = (nodes.panel.offsetHeight || 412);
+        var x = pos ? pos.x : 0, y = pos ? pos.y : 0;
+
+        var toRight = (x + s / 2) > v.w / 2;
+        nodes.panel.classList.toggle('cmc-panel-right', toRight);
+
+        var down = (y - ph - 18) < 8;
+        nodes.panel.classList.toggle('cmc-panel-down', down);
+
+        var room = down ? (v.h - y - s - 18) : (y - 18);
+        nodes.panel.style.maxHeight = Math.max(200, Math.min(412, room)) + 'px';
+    }
+
+    function loadPos() {
+        var p = null;
+        try { p = JSON.parse(localStorage.getItem(POS_KEY) || 'null'); } catch (e) { p = null; }
+        var v = viewport(), s = ballSize();
+        if (!p || typeof p.x !== 'number' || typeof p.y !== 'number') {
+            p = { x: 20, y: v.h - s - 20 };     // 默认左下角（和以前一样）
+        }
+        applyPos(p.x, p.y, false);
+    }
+    function savePos() {
+        try { localStorage.setItem(POS_KEY, JSON.stringify(pos)); } catch (e) {}
+    }
+
+    function onDragStart(e) {
+        if (e.button !== undefined && e.button !== 0) return;
+        var r = nodes.btn.getBoundingClientRect();
+        dragStart = { px: e.clientX, py: e.clientY, x: r.left, y: r.top, id: e.pointerId };
+        dragMoved = 0;
+        nodes.root.classList.remove('cmc-anim');   // 刚贴过边时左/上有过渡，拖起来必须跟手
+        nodes.root.classList.add('cmc-dragging');
+        try { nodes.btn.setPointerCapture(e.pointerId); } catch (err) {}
+    }
+
+    function onDragMove(e) {
+        if (!dragStart) return;
+        var dx = e.clientX - dragStart.px;
+        var dy = e.clientY - dragStart.py;
+        dragMoved = Math.max(dragMoved, Math.abs(dx) + Math.abs(dy));
+        if (dragMoved < 3) return;
+        nodes.btn.classList.add('cmc-drag-on');
+        applyPos(dragStart.x + dx, dragStart.y + dy, false);
+        if (!dragRaf) dragRaf = requestAnimationFrame(function () { dragRaf = 0; placePanel(); });
+    }
+
+    function onDragEnd(e) {
+        if (!dragStart) return;
+        dragStart = null;
+        nodes.root.classList.remove('cmc-dragging');
+        nodes.btn.classList.remove('cmc-drag-on');
+        try { nodes.btn.releasePointerCapture(e.pointerId); } catch (err) {}
+
+        if (dragMoved > 6) {
+            // 拖过就不算点击；松手停在原地，不吸边（想放哪儿就放哪儿，只保证不出屏）
+            suppressClick = true;
+            setTimeout(function () { suppressClick = false; }, 400);
+            applyPos(pos.x, pos.y, false);
+            savePos();
+            updateAtJump();
+        }
+        dragMoved = 0;
+    }
+
+    function setOpen(next) {
+        if (window.__cmUiDebug) { if (next) window.__cmUiDebug.opens++; else window.__cmUiDebug.closes++; }
+        open = next;
+        nodes.panel.classList.toggle('cmc-hidden', !open);
+        nodes.root.classList.toggle('cmc-open', open);
+        nodes.btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+        if (open) {
+            nodes.badge.classList.add('cmc-hidden');
+            nodes.badge.classList.remove('cmc-badge-at');
+            nodes.badge.textContent = '';
+            unread = 0;
+            atPending = false;
+            placePanel();
+            ping();
+            applyTitle();   // 看过了，标题还原
+            setTimeout(function () {
+                if (!open) return;
+                if (stickBottom) nodes.list.scrollTop = nodes.list.scrollHeight;
+                try { nodes.input.focus(); } catch (e) {}
+                updateAtJump();
+            }, 180);
+        } else {
+            closeMention();
+            hideJump();
+            try { nodes.input.blur(); } catch (e) {}
+            // 面板开着时攒下的未读（人不在标签页）——收起面板时补到角标上
+            if (unread > 0) {
+                nodes.badge.textContent = atPending ? '@' : String(unread);
+                nodes.badge.classList.toggle('cmc-badge-at', atPending);
+                nodes.badge.classList.remove('cmc-hidden');
+            }
+            applyTitle();
+        }
+    }
+
+    /* ---------------- 图片 ---------------- */
+
+    function clearImage() {
+        pendingImgs = [];
+        renderPreview();
+    }
+
+    // 把一张图读进来并压成适合发协议的小 dataURL（≤ 约 54KB），失败回调 null
+    function readImage(file, cb) {
+        var fr = new FileReader();
+        fr.onerror = function () { cb(null, '这张图读不出来'); };
+        fr.onload = function () {
+            var img = new Image();
+            img.onerror = function () { cb(null, '这张图读不出来'); };
+            img.onload = function () {
+                var out = encodeImage(img);
+                if (!out) { cb(null, '这张图压不小，换一张试试'); return; }
+                cb(out);
+            };
+            img.src = fr.result;
+        };
+        fr.readAsDataURL(file);
+    }
+
+    /* 编码策略：
+     * 不透明的图压 JPEG（最省）；
+     * 带透明的图必须走 PNG / WebP —— JPEG 没有 alpha 通道，透明的地方会变成黑块。
+     * 长边 600px 起步，塞不进一帧就逐级缩边长。
+     */
+    var IMG_MAX = 600;
+    var IMG_BUDGET = 52000;    // dataURL 长度（约 52KB）以内最理想
+    var IMG_HARD = 54000;      // 协议一帧的硬上限
+    var IMG_MIN = 200;         // 缩到这个边长还塞不进就放弃
+
+    function hasAlpha(cv) {
+        try {
+            var d = cv.getContext('2d').getImageData(0, 0, cv.width, cv.height).data;
+            for (var i = 3; i < d.length; i += 4) if (d[i] < 250) return true;
+            return false;
+        } catch (e) { return false; }
+    }
+
+    function encodeImage(img) {
+        var w = img.width, h = img.height;
+        if (!w || !h) return null;
+
+        var side = IMG_MAX, alpha = false, first = true;
+        for (var round = 0; round < 10; round++) {
+            var scale = Math.min(1, side / Math.max(w, h));
+            var cw = Math.max(1, Math.round(w * scale));
+            var ch = Math.max(1, Math.round(h * scale));
+            var cv = document.createElement('canvas');
+            cv.width = cw; cv.height = ch;
+            cv.getContext('2d').drawImage(img, 0, 0, cw, ch);
+            if (first) { alpha = hasAlpha(cv); first = false; }
+
+            var url = alpha ? encodeAlpha(cv) : encodeJpeg(cv);
+            if (url && url.length <= IMG_HARD) {
+                return { url: url, w: cw, h: ch, alpha: alpha,
+                    kb: Math.max(1, Math.round(url.length / 1024)) };
+            }
+            if (side <= IMG_MIN) break;
+            side = Math.max(IMG_MIN, Math.round(side * 0.84));
+        }
+        return null;
+    }
+
+    // 不透明：600px + 0.82 起步，超出预算再逐步降质量（先保清晰）
+    function encodeJpeg(cv) {
+        var q = 0.82, url = cv.toDataURL('image/jpeg', q);
+        while (url.length > IMG_BUDGET && q > 0.34) {
+            q -= 0.06;
+            url = cv.toDataURL('image/jpeg', q);
+        }
+        return url;
+    }
+
+    // 透明：先试无损 PNG；太大就换 WebP（有损但保留 alpha，体积能小一半以上）
+    function encodeAlpha(cv) {
+        var best = cv.toDataURL('image/png');
+        if (best.length <= IMG_BUDGET) return best;
+
+        for (var q = 0.94; q >= 0.5; q -= 0.06) {
+            var webp;
+            try { webp = cv.toDataURL('image/webp', q); } catch (e) { break; }
+            // 不支持 webp 的浏览器会退回 png，这种就不要再折腾了
+            if (!webp || webp.indexOf('data:image/webp') !== 0) break;
+            if (webp.length < best.length) best = webp;
+            if (best.length <= IMG_BUDGET) break;
+        }
+        return best;
+    }
+
+    function renderPreview(stickEnd) {
+        if (!nodes.previewStrip) return;
+        var keepLeft = nodes.previewStrip.scrollLeft;
+        while (nodes.previewStrip.firstChild) nodes.previewStrip.removeChild(nodes.previewStrip.firstChild);
+
+        if (!pendingImgs.length) {
+            nodes.preview.classList.add('cmc-hidden');
+            nodes.previewMeta.textContent = '';
+            updateAtJump();
+            return;
+        }
+        hideJump();   // 预览条展开时别让跳转按钮压在上面
+
+        pendingImgs.forEach(function (it, idx) {
+            var box = el('div', 'cmc-thumb');
+            var im = document.createElement('img');
+            im.src = it.url;
+            im.alt = '';
+            box.appendChild(im);
+            var del = el('button', 'cmc-thumb-x', '×');
+            del.type = 'button';
+            del.title = '移掉这张';
+            del.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                pendingImgs.splice(idx, 1);
+                renderPreview();
+            });
+            box.appendChild(del);
+            nodes.previewStrip.appendChild(box);
+        });
+
+        var kb = pendingImgs.reduce(function (a, b) { return a + b.kb; }, 0);
+        var tr = pendingImgs.filter(function (x) { return x.alpha; }).length;
+        nodes.previewMeta.textContent = pendingImgs.length + ' 张 · ' + kb + 'KB' + (tr ? ' · 透明 ' + tr : '');
+        nodes.preview.classList.remove('cmc-hidden');
+        // 一张一张加的时候跟到最新；一次选一批就停在开头，按选择顺序看
+        nodes.previewStrip.scrollLeft = stickEnd ? nodes.previewStrip.scrollWidth : keepLeft;
+    }
+
+    // 支持一次选多张：全部读完再一起落到预览条，避免顺序乱跳
+    function addImages(files) {
+        var list = Array.prototype.slice.call(files || []).filter(function (f) {
+            return /^image\//.test(f.type || '');
+        });
+        if (!list.length) { sys('只能发图片', 'bad'); return; }
+
+        var room = MAX_IMGS - pendingImgs.length;
+        if (room <= 0) { sys('一次最多 ' + MAX_IMGS + ' 张，先发掉一些吧', 'bad'); return; }
+        if (list.length > room) {
+            sys('一次最多 ' + MAX_IMGS + ' 张，多出的 ' + (list.length - room) + ' 张没有加进来');
+            list = list.slice(0, room);
+        }
+
+        var slots = new Array(list.length);
+        var done = 0, failed = 0;
+        list.forEach(function (f, i) {
+            readImage(f, function (item, why) {
+                if (item) slots[i] = item; else { failed++; if (why) sys(why, 'bad'); }
+                if (++done < list.length) return;
+                slots.forEach(function (it) { if (it) pendingImgs.push(it); });
+                renderPreview(list.length === 1);
+                if (pendingImgs.length) nodes.list.scrollTop = nodes.list.scrollHeight;
+                if (failed && !pendingImgs.length) sys('图片没能加进来', 'bad');
+            });
+        });
+    }
+
+    /* ---------------- @ 提及 ---------------- */
+
+    function insertAt() {
+        var input = nodes.input;
+        var v = input.value;
+        var pos = input.selectionStart === null ? v.length : input.selectionStart;
+        var needSpace = pos > 0 && !/\s$/.test(v.slice(0, pos));
+        var text = (needSpace ? ' ' : '') + '@';
+        input.value = v.slice(0, pos) + text + v.slice(pos);
+        var caret = pos + text.length;
+        input.setSelectionRange(caret, caret);
+        input.focus();
+        refreshMention();
+    }
+
+    // 光标前是不是 "@关键词"
+    function currentMentionQuery() {
+        var input = nodes.input;
+        var pos = input.selectionStart === null ? input.value.length : input.selectionStart;
+        var before = input.value.slice(0, pos);
+        var m = /(^|\s)@([^\s@]{0,12})$/.exec(before);
+        if (!m) return null;
+        return { q: m[2] || '', start: m.index + m[1].length, end: pos };
+    }
+
+    function refreshMention() {
+        var ctx = currentMentionQuery();
+        if (!ctx) { closeMention(); return; }
+        var q = ctx.q.toLowerCase();
+        mention.items = users.filter(function (u) {
+            if (myId && Number(u.id) === Number(myId)) return false;
+            if (!q) return true;
+            return String(u.n || '').toLowerCase().indexOf(q) >= 0 || String(u.id).indexOf(q) >= 0;
+        }).slice(0, 6);
+        mention.index = 0;
+        mention.open = true;
+        renderMention();
+    }
+
+    function renderMention() {
+        if (!mention.open) { nodes.menu.classList.add('cmc-hidden'); return; }
+        nodes.menu.classList.remove('cmc-hidden');
+        nodes.menu.textContent = '';
+        if (!mention.items.length) {
+            nodes.menu.appendChild(el('div', 'cmc-mention-empty',
+                users.length > 1 ? '没有匹配的成员' : '还没有其他成员在线'));
+            return;
+        }
+        mention.items.forEach(function (u, i) {
+            var row = el('div', 'cmc-mention-item' + (i === mention.index ? ' cmc-mention-on' : ''));
+            row.appendChild(avatarNode(u.n, u.id, u.a, true));
+            var box = el('div', 'cmc-mention-txt');
+            box.appendChild(el('span', 'cmc-mention-name', u.n));
+            box.appendChild(el('span', 'cmc-mention-id', '#' + u.id));
+            row.appendChild(box);
+            row.addEventListener('mousedown', function (e) {
+                e.preventDefault();
+                pickMention(u);
+            });
+            nodes.menu.appendChild(row);
+        });
+    }
+
+    function closeMention() {
+        mention.open = false;
+        mention.items = [];
+        if (nodes.menu) nodes.menu.classList.add('cmc-hidden');
+    }
+
+    function pickMention(u) {
+        var input = nodes.input;
+        var ctx = currentMentionQuery();
+        if (!ctx) { closeMention(); return; }
+        var v = input.value;
+        var insert = '@' + (u.n || String(u.id)) + ' ';
+        input.value = v.slice(0, ctx.start) + insert + v.slice(ctx.end);
+        var caret = ctx.start + insert.length;
+        input.setSelectionRange(caret, caret);
+        input.focus();
+        closeMention();
+    }
+
+    function onInputKey(e) {
+        if (mention.open) {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                mention.index = (mention.index + 1) % Math.max(1, mention.items.length);
+                renderMention();
+                return;
+            }
+            if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                mention.index = (mention.index - 1 + mention.items.length) % Math.max(1, mention.items.length);
+                renderMention();
+                return;
+            }
+            if (e.key === 'Enter' && mention.items[mention.index]) {
+                e.preventDefault();
+                pickMention(mention.items[mention.index]);
+                return;
+            }
+            if (e.key === 'Escape') { e.preventDefault(); closeMention(); return; }
+        }
+        if (e.key === 'Enter' && !e.isComposing) { e.preventDefault(); doSend(); }
+    }
+
+    function collectMentions(text) {
+        var ids = [];
+        users.forEach(function (u) {
+            if (!u.n || !u.id) return;
+            if (text.indexOf('@' + u.n) >= 0) ids.push(Number(u.id));
+        });
+        return ids;
+    }
+
+    /* ---------------- 发送 ---------------- */
+
+    function sys(text, level) {
+        msgs.push({ sys: true, text: text, level: level || 'info', ts: Date.now() });
+        renderList();
+    }
+
+    /* 一条「逻辑消息」= 一个气泡。
+     * 协议一条只能带一张图，所以多图会拆成好几帧；这些帧共用同一个 group 号，
+     * 气泡只建一个，图按顺序往 m.imgs 里堆。 */
+    function newMsg(text, imgs, mentions, group) {
+        var reqId = 'r' + (++reqSeq);
+        var m = {
+            id: 'me_' + reqId, text: text, nickname: myName, uid: myId, avatar: myAvatar,
+            img: imgs && imgs.length ? imgs[0] : '',
+            imgs: imgs ? imgs.slice() : [],
+            mentions: mentions || [], ts: Date.now(), self: true, state: 'sending',
+            group: group || '', frames: 1, sentN: 0, ackN: 0, failN: 0
+        };
+        msgs.push(m);
+        renderList();
+        return m;
+    }
+
+    function sendFrame(m, text, img, mentions, group, gi, gt) {
+        var reqId = 'r' + (++reqSeq);
+        m.frames = Math.max(1, gt || 1);
+        pendingSend[reqId] = m;
+        sendLog(reqId, text, img, mentions, group, gi || 0, gt || 1);
+        window.postMessage({
+            type: 'CM_SEND', text: text, nickname: myName, reqId: reqId,
+            img: img, mentions: mentions || [],
+            gid: group || '', gi: gi || 0, gt: gt || 1
+        }, '*');
+    }
+
+    // 一帧一帧地回执，气泡状态要等所有帧都发出／回执了才算数
+    function syncMsgState(m) {
+        var f = m.frames || 1;
+        if ((m.failN || 0) > 0) { m.state = 'failed'; return; }
+        if ((m.ackN || 0) >= f) { m.state = 'ack'; return; }
+        if ((m.sentN || 0) >= f) { m.state = 'sent'; return; }
+        m.state = 'sending';
+    }
+
+    function doSend() {
+        var text = nodes.input.value.trim();
+        if (!text && !pendingImgs.length) return;
+        if (!st.connected) { sys('还没连上协作频道，进入多人编辑后会自动连上'); return; }
+
+        var imgs = pendingImgs.slice();
+        var mentions = text ? collectMentions(text) : [];
+
+        nodes.input.value = '';
+        clearImage();
+        closeMention();
+
+        if (!imgs.length) {
+            var one = newMsg(text, [], mentions);
+            sendFrame(one, text, '', mentions, '', 0, 1);
+            return;
+        }
+
+        if (imgs.length === 1) {
+            var single = newMsg(text, [imgs[0].url], mentions);
+            sendFrame(single, text, imgs[0].url, mentions, '', 0, 1);
+            return;
+        }
+
+        // 多图：一个气泡装全部，底下按顺序拆成几条协议消息发出去
+        var gid = 'g' + Date.now().toString(36) + Math.floor(Math.random() * 1296).toString(36);
+        var group = newMsg(text, imgs.map(function (x) { return x.url; }), mentions, gid);
+        try {
+            console.log('%c[协作聊天] ↑ 一次发 ' + imgs.length + ' 张图', 'color:#1d6df0;font-weight:700',
+                '组 ' + gid + ' · 每 ' + SEND_GAP + 'ms 一帧 · 拼成同一个气泡');
+        } catch (e) {}
+
+        var i = 0;
+        (function step() {
+            if (i >= imgs.length) return;
+            var first = i === 0;
+            // 文字跟第一张一起发，@ 也只带一次，免得对方被 @ 好几遍
+            sendFrame(group, first ? text : '', imgs[i].url, first ? mentions : [], gid, i, imgs.length);
+            i++;
+            if (i < imgs.length) setTimeout(step, SEND_GAP);
+        })();
+    }
+
+    /* ---------------- 收消息 ---------------- */
+
+    function onMessage(ev) {
+        if (ev.source && ev.source !== window) return;
+        var d = ev.data;
+        if (!d || typeof d !== 'object') return;
+
+        if (d.type === 'CM_STATUS') {
+            st = d.s || st;
+            renderStatus();
+            return;
+        }
+        if (d.type === 'CM_IDENTITY') {
+            // 身份每 5 秒会同步一次，没变化就完全不动 DOM（这是之前「一直抖」的另一个来源）
+            var idSig = [d.userId || 0, d.name || '',
+                (d.users || []).map(function (u) { return (u.id || 0) + ':' + (u.n || '') + ':' + (u.a || ''); }).join(',')
+            ].join('|');
+            if (idSig === lastIdSig) return;
+            lastIdSig = idSig;
+
+            if (d.userId) myId = d.userId;
+            if (d.name) myName = d.name;
+            if (Array.isArray(d.users)) users = d.users;
+            var selfUser = findUser(myId);
+            myAvatar = (selfUser && selfUser.a) || '';
+            renderIdentity();
+            renderList();
+            if (mention.open) refreshMention();
+            return;
+        }
+        if (d.type === 'CM_SENT') {
+            var m = pendingSend[d.reqId];
+            if (!m) return;
+            delete pendingSend[d.reqId];
+            if (d.ok) {
+                m.sentN = (m.sentN || 0) + 1;
+                if (ackCredit > 0) {
+                    // 回执已经先到了，直接打勾
+                    ackCredit--;
+                    m.ackN = (m.ackN || 0) + 1;
+                } else {
+                    waitingAck.push(m);
+                    if (waitingAck.length > 60) waitingAck.shift();
+                }
+                syncMsgState(m);
+                if ((m.sentN || 0) >= (m.frames || 1) && !m.lateTimer) {
+                    m.lateTimer = setTimeout(function () {
+                        if (m.state === 'sent') { m.state = 'sent-nolog'; renderList(); }
+                    }, 3000);
+                }
+                renderList();
+            } else {
+                m.failN = (m.failN || 0) + 1;
+                m.state = 'failed';
+                m.error = d.error;
+                renderList();
+                sys(d.error || '发送失败', 'bad');
+            }
+            return;
+        }
+        if (d.type === 'CM_ACK') {
+            if (d.code === 1) {
+                if (waitingAck.length) {
+                    var t = waitingAck.shift();
+                    t.ackN = (t.ackN || 0) + 1;
+                    syncMsgState(t);
+                } else {
+                    if (ackCredit < 12) ackCredit++;
+                }
+                renderList();
+            } else if (d.code !== 1) {
+                sys('服务器拒绝了这条消息（code=' + d.code + '）', 'bad');
+            }
+            return;
+        }
+        if (d.type === 'CM_RECEIVE') {
+            var mm = d.m || {};
+            if (mm.id && msgs.some(function (x) { return x.id === mm.id; })) return;
+
+            // 同一组的多张图：并到最先到的那条气泡里，按序号排好
+            var gid = (typeof mm.gid === 'string' && mm.gid) ? mm.gid : '';
+            if (gid) {
+                var host = null;
+                for (var gi2 = msgs.length - 1; gi2 >= 0; gi2--) {
+                    if (msgs[gi2].group === gid) { host = msgs[gi2]; break; }
+                }
+                if (host) {
+                    var parts = host._parts || (host.img ? [{ i: 0, u: host.img }] : []);
+                    if (mm.img) parts.push({ i: mm.gi || 0, u: mm.img });
+                    parts.sort(function (a, b) { return a.i - b.i; });
+                    host._parts = parts;
+                    host.imgs = parts.map(function (x) { return x.u; }).filter(Boolean);
+                    if (!host.img) host.img = mm.img || '';
+                    if (!host.text && mm.text) host.text = mm.text;
+                    if (!(host.mentions || []).length && mm.mentions && mm.mentions.length) {
+                        host.mentions = mm.mentions;
+                    }
+                    renderList();
+                    if (!open && isMentionMe(host)) notifyAt();
+                    return;
+                }
+            }
+
+            var rec = {
+                id: mm.id, text: mm.text, nickname: mm.nickname, uid: mm.uid || 0,
+                avatar: mm.avatar || '', img: mm.img || '',
+                imgs: mm.img ? [mm.img] : [], group: gid,
+                _parts: mm.img ? [{ i: mm.gi || 0, u: mm.img }] : [],
+                mentions: Array.isArray(mm.mentions) ? mm.mentions : [],
+                ts: mm.ts, self: false, state: 'ack'
+            };
+            msgs.push(rec);
+            renderList();
+            // 面板关着 → 算未读；面板开着但人已经切到别的标签/窗口 → 也算未读（标题会提示）
+            if (shouldCountUnread()) {
+                if (isMentionMe(rec)) notifyAt();
+                else {
+                    unread++;
+                    if (!atPending && !open) {
+                        nodes.badge.classList.remove('cmc-badge-at');
+                        nodes.badge.textContent = String(unread);
+                        nodes.badge.classList.remove('cmc-hidden');
+                    }
+                }
+                if (!open) {
+                    nodes.btn.classList.add('cmc-flash');
+                    setTimeout(function () { nodes.btn.classList.remove('cmc-flash'); }, 1600);
+                }
+                applyTitle();
+            }
+        }
+    }
+
+    /* 这条消息有没有 @ 到我 */
+    function isMentionMe(m) {
+        if (!m || m.self || m.sys || !myId) return false;
+        if (!Array.isArray(m.mentions) || !m.mentions.length) return false;
+        return m.mentions.some(function (id) { return Number(id) === Number(myId); });
+    }
+
+    // 面板关着又被人 @：角标直接显示 @，比数字醒目
+    function notifyAt() {
+        unread++;
+        atPending = true;
+        if (!open) {
+            nodes.badge.textContent = '@';
+            nodes.badge.classList.add('cmc-badge-at');
+            nodes.badge.classList.remove('cmc-hidden');
+        }
+        applyTitle();
+    }
+
+    /* ---------------- 人还在不在这个标签页 ---------------- */
+    /* 切到别的标签（hidden）、切到别的窗口（blur）、最小化，都算「人不在」，这时候来的消息要攒着。 */
+    function attended() {
+        if (document.hidden || document.visibilityState === 'hidden') return false;
+        return pageFocused;
+    }
+
+    // 新消息要不要记成未读：面板关着要记；面板开着但人不在这个标签，也要记
+    function shouldCountUnread() {
+        return !open || !attended();
+    }
+
+    // 回到这个标签：面板开着说明消息就在眼前，未读清掉、标题还原（面板关着就继续留着）
+    function onBackToPage() {
+        if (!attended()) return;
+        if (open && unread > 0) {
+            unread = 0;
+            atPending = false;
+            applyTitle();
+        }
+    }
+
+    function watchPage() {
+        document.addEventListener('visibilitychange', function () {
+            if (!document.hidden) onBackToPage();
+        });
+        window.addEventListener('focus', function () { pageFocused = true; onBackToPage(); });
+        window.addEventListener('blur', function () { pageFocused = false; });
+    }
+
+    /* ---------------- 标签页标题的未读提示 ---------------- */
+    /* 关着面板收到消息时，把标题改成「（你有n条消息未读）全新源码编辑器 - 搭积木一样有趣的编程工具」，
+       点开面板看一眼就还原。站点自己也会改标题（切作品、切场景），所以每次都从当前标题里剥掉前缀现取，
+       再用 MutationObserver 盯住 <title>，被覆盖了就补回去。 */
+    function siteTitle() {
+        var t = String(document.title || '');
+        return t.replace(TITLE_RE, '') || TITLE_BASE_DEFAULT;
+    }
+
+    function applyTitle() {
+        var base = siteTitle();
+        var want = (unread > 0)
+            ? ('（你有' + unread + '条消息未读）' + base)
+            : base;
+        if (document.title !== want) document.title = want;
+    }
+
+    function watchTitle() {
+        try {
+            var t = document.querySelector('title');
+            if (!t || !window.MutationObserver) return;
+            new MutationObserver(function () { applyTitle(); }).observe(t, {
+                childList: true, characterData: true, subtree: true
+            });
+        } catch (e) {}
+    }
+
+    /* ---------------- 渲染 ---------------- */
+
+    /* ---------------- 跟随编辑器主题色 ---------------- */
+    /* Kitten 的 6 套主题会把主色写进 --theme-color-0（"255,120,41" 这种），顶栏背景也是它 */
+    var themeKey = '';
+
+    function readTint() {
+        var probe = [document.documentElement, document.body];
+        for (var i = 0; i < probe.length; i++) {
+            if (!probe[i]) continue;
+            try {
+                var v = getComputedStyle(probe[i]).getPropertyValue('--theme-color-0').trim();
+                var m = /(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/.exec(v);
+                if (m) return [+m[1], +m[2], +m[3]];
+            } catch (e) {}
+        }
+        // 兜底：直接量顶栏背景色
+        try {
+            var h = document.querySelector('header[class*=header], div[class*=header--], div[class*=header]');
+            if (h) {
+                var m2 = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(getComputedStyle(h).backgroundColor);
+                if (m2 && !(+m2[1] === 255 && +m2[2] === 255 && +m2[3] === 255)) return [+m2[1], +m2[2], +m2[3]];
+            }
+        } catch (e) {}
+        return null;
+    }
+
+    function mix(c, to, k) { return Math.round(c + (to - c) * k); }
+
+    function applyTheme() {
+        if (!nodes.root) return;
+        var rgb = readTint();
+        if (!rgb) return;
+        var key = rgb.join(',');
+        if (key === themeKey) return;
+        themeKey = key;
+        var soft = rgb.map(function (c) { return mix(c, 255, .62); });   // 浅一档，做填充
+        var deep = rgb.map(function (c) { return mix(c, 0, .34); });     // 深一档，做文字/描边
+        nodes.root.style.setProperty('--cmc-tint', key);
+        nodes.root.style.setProperty('--cmc-tint-soft', soft.join(','));
+        nodes.root.style.setProperty('--cmc-tint-deep', deep.join(','));
+    }
+
+    /* 作品名以页面顶栏那个输入框为准（join_ack 里的 project_name 可能是旧名或角色名） */
+    function readWorkName() {
+        try {
+            var inp = document.querySelector('input[placeholder="作品名称不能为空"]');
+            if (inp && typeof inp.value === 'string') {
+                var v = inp.value.trim();
+                if (v) return v;
+            }
+            // 兜底：占位文案不一定是这句，就找顶栏里第一个像名字的输入框
+            var top = document.querySelectorAll('input.CUI-input-common-input');
+            for (var i = 0; i < top.length; i++) {
+                var r = top[i].getBoundingClientRect();
+                if (r.top > 60 || r.width < 60) continue;
+                if (/作品名称|名称/.test(top[i].placeholder || '') && top[i].value.trim()) return top[i].value.trim();
+            }
+        } catch (e) {}
+        return '';
+    }
+
+    function renderStatus() {
+        if (!nodes.root) return;
+        var s, cls;
+        var workName = readWorkName() || st.projectName || '';
+        if (st.connected && st.actorId) {
+            // 房间名 + 房间号：作品名可能重名，括号里的 work_id 才是唯一标识
+            var rid = st.roomId ? String(st.roomId) : '';
+            var rname = workName || '房间';
+            s = '已连接 · ' + rname + (rid ? '（' + rid + '）' : '');
+            cls = 'cmc-dot cmc-dot-on';
+        } else if (st.connected) {
+            s = '正在同步房间信息…';
+            cls = 'cmc-dot cmc-dot-wait';
+        } else {
+            s = '等待协作连接…';
+            cls = 'cmc-dot';
+        }
+        nodes.bar.textContent = s;
+        nodes.dot.className = cls;
+        nodes.bar.title =
+            (st.roomId ? '房间号 ' + st.roomId : '') +
+            (workName ? ' · 作品：' + workName : '') +
+            '\n收发 ' + st.msgOut + '/' + st.msgIn + ' · 回执 ' + st.acks +
+            ' · rev ' + st.revision + (st.lastError ? ' · 错误 ' + st.lastError : '');
+
+        if (st.connected) {
+            if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+            nodes.root.classList.remove('cmc-off');
+        } else if (!hideTimer && !nodes.root.classList.contains('cmc-off')) {
+            hideTimer = setTimeout(function () {
+                hideTimer = null;
+                if (!st.connected) nodes.root.classList.add('cmc-off');
+            }, 1200);
+        }
+    }
+
+    function renderIdentity() {
+        if (!nodes.me) return;
+        nodes.me.textContent = label(myName, myId);
+        nodes.me.title = myId ? ('协作 id：' + myId + (myName ? ' · ' + myName : '')) : '正在获取协作身份…';
+    }
+
+    /* ---------------- 列表：增量渲染 ----------------
+     * 以前是「清空 + 重建」，收到任何广播（比如每 5 秒的身份同步）都会把所有气泡重建一遍，
+     * 入场动画跟着重放，看起来就是一直在抖。现在按 key 复用节点：
+     *   - 新消息只 append
+     *   - 状态变化（发送中 → 已打勾）只替换那一条
+     *   - 其它情况一律不动 DOM
+     */
+    var lastIdSig = '';
+    var rowMap = {};           // key → 节点
+    var rowSig = {};           // key → 渲染签名（变了才重建那一条）
+
+    function keyOf(m, i) {
+        if (m.sys) return 'sys#' + i;
+        return 'm#' + (m.id || ('i' + i + '_' + m.ts));
+    }
+
+    function sigOf(m) {
+        var urls = m.imgs && m.imgs.length ? m.imgs : (m.img ? [m.img] : []);
+        return [
+            m.self ? 1 : 0, m.state || '', m.text || '', urls.length,
+            urls.length ? urls[0].length + ':' + (urls[urls.length - 1] || '').slice(-24) : '',
+            (m.mentions || []).join(','), m.nickname || '', m.uid || 0, m.ts || 0,
+            m.self ? (myAvatar || '') : (m.avatar || ''), myId || 0
+        ].join('|');
+    }
+
+    function buildRow(m, atMe) {
+        if (m.sys) return el('div', 'cmc-sys' + (m.level === 'bad' ? ' cmc-sys-bad' : ''), m.text);
+
+        var row = el('div', 'cmc-row ' + (m.self ? 'cmc-row-self' : 'cmc-row-other'));
+        var avaUrl = m.self ? myAvatar : (m.avatar || '');
+        row.appendChild(avatarNode(m.self ? myName : m.nickname, m.self ? myId : m.uid, avaUrl));
+
+        var wrap = el('div', 'cmc-msg ' + (m.self ? 'cmc-self' : 'cmc-other') + (atMe ? ' cmc-at' : ''));
+
+        var meta = el('div', 'cmc-meta');
+        meta.appendChild(m.self ? nameWithId('我', myId) : nameWithId(m.nickname, m.uid));
+        meta.appendChild(el('span', 'cmc-time', hhmmss(m.ts)));
+        if (atMe) meta.appendChild(el('span', 'cmc-atme', '@我'));
+        if (m.self && m.state === 'ack') {
+            var tick = el('span', 'cmc-tick', '✓');
+            tick.title = '服务器已接收（operation_ack code=1）';
+            meta.appendChild(tick);
+        }
+        wrap.appendChild(meta);
+
+        // 一次连发的多张图全部装在这一个气泡里
+        var urls = m.imgs && m.imgs.length ? m.imgs : (m.img ? [m.img] : []);
+        if (urls.length) {
+            var n = urls.length;
+            var box = el('div', 'cmc-imgs' + (n >= 5 ? ' cmc-imgs-3' : '') + (n === 1 ? ' cmc-imgs-1' : ''));
+            urls.forEach(function (u) {
+                if (!u) return;
+                var im = document.createElement('img');
+                im.className = 'cmc-img';
+                im.alt = '图片';
+                im.src = u;
+                im.addEventListener('click', function () {
+                    nodes.bigImg.src = u;
+                    nodes.lightbox.classList.remove('cmc-hidden');
+                });
+                // 图还没加载完时高度为 0，加载后会把列表顶起来，这时要重新贴底
+                im.addEventListener('load', function () {
+                    if (stickBottom && nodes.list) nodes.list.scrollTop = nodes.list.scrollHeight;
+                });
+                box.appendChild(im);
+            });
+            wrap.appendChild(box);
+        }
+        if (m.text) wrap.appendChild(el('div', 'cmc-text', m.text));
+
+        if (m.state === 'sending') wrap.appendChild(el('div', 'cmc-flag', '发送中…'));
+        if (m.state === 'sent-nolog') wrap.appendChild(el('div', 'cmc-flag', '已发出（未收到回执）'));
+        if (m.state === 'failed') wrap.appendChild(el('div', 'cmc-flag cmc-flag-bad', '发送失败'));
+
+        row.appendChild(wrap);
+        return row;
+    }
+
+    function renderList() {
+        if (!nodes.list) return;
+
+        var slice = msgs.slice(-200);
+        var base = msgs.length - slice.length;
+        var list = nodes.list;
+        var h0 = list.scrollHeight;
+
+        // 1) 删掉已经不在窗口里的
+        var wanted = {};
+        var i, m, key;
+        for (i = 0; i < slice.length; i++) wanted[keyOf(slice[i], base + i)] = 1;
+        Object.keys(rowMap).forEach(function (k) {
+            if (!wanted[k]) {
+                if (rowMap[k].parentNode === nodes.list) nodes.list.removeChild(rowMap[k]);
+                delete rowMap[k];
+                delete rowSig[k];
+            }
+        });
+
+        // 2) 追加新消息 / 状态变了就只换那一条
+        var appended = false, mineAppended = false;
+        for (i = 0; i < slice.length; i++) {
+            m = slice[i];
+            key = keyOf(m, base + i);
+            var atMe = !m.sys && !m.self && Array.isArray(m.mentions) && myId &&
+                m.mentions.some(function (id) { return Number(id) === Number(myId); });
+            var sig = sigOf(m);
+
+            if (!rowMap[key]) {
+                var node = buildRow(m, atMe);
+                node.setAttribute('data-key', key);
+                if (!m.sys) node.classList.add('cmc-row-in');    // 只有新消息才播入场动画
+                nodes.list.appendChild(node);
+                rowMap[key] = node;
+                rowSig[key] = sig;
+                appended = true;
+                if (!m.sys && m.self) mineAppended = true;
+            } else if (rowSig[key] !== sig) {
+                var fresh = buildRow(m, atMe);                  // 原地替换，不带动画
+                fresh.setAttribute('data-key', key);
+                nodes.list.replaceChild(fresh, rowMap[key]);
+                rowMap[key] = fresh;
+                rowSig[key] = sig;
+            }
+        }
+
+        // 高度变了（新消息、或者同组又并进来一张图）就重新贴底；用户翻在上面时不打扰
+        var grew = list.scrollHeight !== h0;
+        if ((stickBottom && (appended || grew)) || mineAppended) {
+            nodes.list.scrollTop = nodes.list.scrollHeight;
+            stickBottom = true;
+        }
+        if (appended || grew) updateAtJump();
+
+        if (nodes.empty) {
+            var real = 0;
+            for (i = 0; i < msgs.length; i++) if (!msgs[i].sys) { real++; break; }
+            nodes.empty.classList.toggle('cmc-hidden', real > 0);
+        }
+    }
+
+    /* ---------------- @ 跳转 ---------------- */
+
+    function atList() {
+        var out = [];
+        for (var i = 0; i < msgs.length; i++) {
+            var m = msgs[i];
+            if (!isMentionMe(m)) continue;
+            out.push({ key: keyOf(m, i), name: m.nickname || '有人' });
+        }
+        return out;
+    }
+
+    function hideJump() {
+        jumpKey = '';
+        if (nodes.jump) nodes.jump.classList.add('cmc-hidden');
+        if (nodes.panel) nodes.panel.classList.remove('cmc-jump-on');
+    }
+
+    // 最近一条 @ 我的消息不在视野里 → 冒出「↑ 谁 @ 了你」
+    function updateAtJump() {
+        if (!nodes.jump) return;
+        if (!open || !nodes.list || !myId || pendingImgs.length) { hideJump(); return; }
+
+        var target = null;
+        var items = atList();
+        for (var i = items.length - 1; i >= 0; i--) {
+            if (!rowMap[items[i].key]) continue;
+            target = items[i];
+            break;
+        }
+        if (!target) { hideJump(); return; }
+
+        var node = rowMap[target.key];
+        var lr = nodes.list.getBoundingClientRect();
+        var nr = node.getBoundingClientRect();
+        var hidden = nr.bottom < lr.top + 4 || nr.top > lr.bottom - 4;
+
+        if (!hidden || atSeen[target.key]) { hideJump(); return; }
+
+        jumpKey = target.key;
+        nodes.jump.setAttribute('data-key', target.key);
+        nodes.jumpTxt.textContent = target.name + ' @ 了你';
+        nodes.jump.classList.toggle('cmc-jump-down', nr.top > lr.bottom - 4);
+        nodes.jump.classList.remove('cmc-hidden');
+        // 给列表底部留一条缝，别让按钮压住最后一条消息
+        nodes.panel.classList.add('cmc-jump-on');
+        if (stickBottom) nodes.list.scrollTop = nodes.list.scrollHeight;
+    }
+
+    function jumpToAt() {
+        if (window.__cmUiDebug) window.__cmUiDebug.jumpClicks = (window.__cmUiDebug.jumpClicks || 0) + 1;
+        var key = nodes.jump.getAttribute('data-key') || jumpKey;
+        var node = key && rowMap[key];
+        if (!node) { updateAtJump(); return; }
+        atSeen[key] = 1;
+
+        var lr = nodes.list.getBoundingClientRect();
+        var nr = node.getBoundingClientRect();
+        var top = nodes.list.scrollTop + (nr.top - lr.top) - Math.max(0, (lr.height - nr.height) / 2);
+        // 跳过去看历史时别再被新消息拽回底部
+        stickBottom = false;
+        if (window.__cmUiDebug) window.__cmUiDebug.lastJump = { key: key, from: nodes.list.scrollTop, to: top, h: nr.height };
+        try { nodes.list.scrollTo({ top: top, behavior: 'smooth' }); }
+        catch (e) { nodes.list.scrollTop = top; }
+        // 兜底：页面不可见（无头 / 后台标签）时浏览器会冻结平滑滚动，420ms 后还没到位就直接落位
+        clearTimeout(jumpFallbackT);
+        jumpFallbackT = setTimeout(function () {
+            if (Math.abs(nodes.list.scrollTop - top) > 4) nodes.list.scrollTop = top;
+        }, 420);
+
+        node.classList.remove('cmc-hit');
+        void node.offsetWidth;
+        node.classList.add('cmc-hit');
+        setTimeout(function () { node.classList.remove('cmc-hit'); }, 1700);
+
+        hideJump();
+    }
+
+    function ping() { window.postMessage({ type: 'CM_PING' }, '*'); }
+
+    function start() {
+        build();
+        applyTheme();
+        setInterval(applyTheme, 2000);
+        watchTitle();          // 站点的标题随时会变，盯着补回未读前缀
+        watchPage();           // 切标签/切窗口回来的那一刻，把面板里的未读清掉
+        setTimeout(ping, 300);
+        setTimeout(ping, 1200);
+        setInterval(ping, 5000);
+
+        // 作品名在顶栏输入框里，用户改名后状态行要跟着变
+        var lastWork = readWorkName();
+        setInterval(function () {
+            var now = readWorkName();
+            if (now && now !== lastWork) { lastWork = now; renderStatus(); }
+        }, 3000);
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', function () { setTimeout(start, 700); });
+    } else {
+        setTimeout(start, 700);
+    }
+    setTimeout(function () { if (!document.getElementById('cmc-root')) build(); }, 3000);
+})();

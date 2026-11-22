@@ -1,0 +1,913 @@
+/* ============================================================================
+ * Kitten4 协作聊天（Kitten4-Collaborative-Chat）
+ * 透明液态毛玻璃，整体跟着编辑器主题色走（默认晴天橙 #FF7829）：
+ * 主色由 content.js 读取 --theme-color-0，写进 --cmc-tint / -soft / -deep 三个变量。
+ * 玻璃的三件事：透（底色 24%~52% + blur(26~44px) 把背后糊开）、
+ * 厚（1px 发丝描边 + 四边内高光 + 底部内阴影）、染（一层 8% 主题色覆膜）。
+ * 所有类名以 cmc- 前缀，避免和编辑器冲突。
+ * ==========================================================================*/
+
+.cmc-root {
+    --cmc-ink: #15171b;
+    --cmc-dim: rgba(27, 27, 27, .68);
+    --cmc-line: rgba(37, 37, 37, .09);
+    /* 跟随编辑器主题色：content.js 会把这三个值换成 --theme-color-0 派生的 RGB */
+    --cmc-tint: 255, 120, 41;
+    --cmc-tint-soft: 255, 204, 174;
+    --cmc-tint-deep: 168, 79, 27;
+    --cmc-accent: rgb(var(--cmc-tint-deep));
+    --cmc-accent-deep: rgb(var(--cmc-tint-deep));
+
+    position: fixed;
+    left: 20px;
+    bottom: 20px;
+    z-index: 2147483000;
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+    font-size: 12.5px;
+    line-height: 1.5;
+    color: var(--cmc-ink);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    transition: opacity .28s ease, transform .34s cubic-bezier(.22, 1, .28, 1.16), visibility 0s;
+}
+.cmc-root * { box-sizing: border-box; }
+
+/* 松手贴边时 left/top 才有过渡；拖动过程中必须跟手 */
+.cmc-root.cmc-anim {
+    transition:
+        left .34s cubic-bezier(.22, 1.16, .28, 1),
+        top .34s cubic-bezier(.22, 1.16, .28, 1),
+        opacity .28s ease,
+        transform .34s cubic-bezier(.22, 1, .28, 1.16);
+}
+
+.cmc-root.cmc-off {
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(10px) scale(.92);
+    pointer-events: none;
+    transition: opacity .24s ease, transform .28s ease, visibility 0s .28s;
+}
+
+/* ---------------------------------------------------------------- 悬浮玻璃球 */
+
+.cmc-btn {
+    position: relative;
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    color: rgba(52, 52, 52, .78);
+    background: rgba(var(--cmc-tint-soft), .86);
+    -webkit-backdrop-filter: blur(26px) brightness(1.06);
+    backdrop-filter: blur(26px) brightness(1.06);
+    border: 1px solid rgba(255, 255, 255, .9);
+    box-shadow:
+        0 0 0 .5px rgba(30, 32, 36, .07),
+        0 14px 28px -14px rgba(34, 36, 40, .5),
+        0 3px 10px -5px rgba(34, 36, 40, .26),
+        inset 0 1px 0 rgba(255, 255, 255, .96),
+        inset 0 -1px 0 rgba(255, 255, 255, .5),
+        inset 0 -12px 18px -14px rgba(62, 62, 62, .45);
+    transition: transform .3s cubic-bezier(.22, 1, .28, 1.2), box-shadow .3s ease, background .2s ease;
+}
+/* 镜面高光：只有白色，没有彩色渐变 */
+.cmc-btn::before {
+    content: "";
+    position: absolute;
+    inset: 1px;
+    border-radius: 50%;
+    pointer-events: none;
+    background: radial-gradient(120% 92% at 30% 10%, rgba(255, 255, 255, .6), rgba(255, 255, 255, 0) 62%);
+    opacity: .45;
+}
+.cmc-btn:hover {
+    background: rgba(var(--cmc-tint-soft), .93);
+    transform: translateY(-2px);
+    box-shadow:
+        0 16px 30px -14px rgba(48, 48, 48, .52),
+        0 3px 10px -5px rgba(48, 48, 48, .26),
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -12px 18px -14px rgba(62, 62, 62, .42);
+}
+.cmc-btn:active { transform: scale(.94); }
+.cmc-root.cmc-open .cmc-btn { transform: scale(.96); }
+
+/* 拖动中：球「拎起来」一点，面板跟着走但不吃指针 */
+.cmc-root.cmc-dragging .cmc-btn {
+    cursor: grabbing;
+    transform: scale(1.08);
+    box-shadow:
+        0 20px 34px -14px rgba(48, 48, 48, .58),
+        0 4px 12px -6px rgba(48, 48, 48, .3),
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -12px 18px -14px rgba(62, 62, 62, .4);
+}
+.cmc-root.cmc-dragging .cmc-panel { pointer-events: none; }
+
+.cmc-btn-icon,
+.cmc-btn-chevron {
+    position: absolute;
+    display: grid;
+    place-items: center;
+    transition: transform .32s cubic-bezier(.22, 1, .28, 1.2), opacity .2s ease;
+}
+.cmc-btn-icon { opacity: 1; transform: none; }
+.cmc-btn-chevron { opacity: 0; transform: rotate(-90deg) scale(.6); }
+.cmc-root.cmc-open .cmc-btn-icon { opacity: 0; transform: rotate(60deg) scale(.6); }
+.cmc-root.cmc-open .cmc-btn-chevron { opacity: 1; transform: none; }
+
+.cmc-badge {
+    position: absolute;
+    top: -3px;
+    right: -3px;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 4px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 700;
+    color: rgb(var(--cmc-tint-deep));
+    background: rgba(255, 255, 255, .9);
+    border: 1px solid rgba(255, 255, 255, .96);
+    box-shadow:
+        0 0 0 .5px rgba(30, 32, 36, .1),
+        0 4px 10px -4px rgba(40, 44, 52, .3),
+        inset 0 1px 0 rgba(255, 255, 255, .98);
+    animation: cmc-badge-in .3s cubic-bezier(.22, 1, .3, 1.4) both;
+}
+/* 被 @ 的角标用深色，比数字醒目 */
+.cmc-badge.cmc-badge-at {
+    color: #fff;
+    background: #27b56a;
+    font-size: 11px;
+    box-shadow: 0 0 0 .5px rgba(24, 128, 74, .2), 0 4px 10px -3px rgba(24, 128, 74, .5);
+}
+.cmc-hidden { display: none !important; }
+
+/* ---------------------------------------------------------------- 玻璃面板 */
+
+.cmc-panel {
+    position: absolute;
+    left: 0;
+    bottom: 58px;
+    width: 308px;
+    height: 412px;
+    max-width: calc(100vw - 40px);
+    max-height: calc(100vh - 110px);
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    border-radius: 22px;
+    border: 1px solid rgba(255, 255, 255, .6);
+    background: rgba(255, 255, 255, .26);
+    -webkit-backdrop-filter: blur(44px) brightness(1.04);
+    backdrop-filter: blur(44px) brightness(1.04);
+    box-shadow:
+        0 0 0 1px rgba(37, 37, 37, .05),
+        0 28px 64px -28px rgba(41, 41, 41, .46),
+        0 10px 24px -16px rgba(41, 41, 41, .26),
+        inset 0 1px 0 rgba(255, 255, 255, .86),
+        inset 0 -1px 0 rgba(255, 255, 255, .4),
+        inset 1px 0 0 rgba(255, 255, 255, .5),
+        inset -1px 0 0 rgba(255, 255, 255, .36);
+    transform-origin: bottom left;
+    opacity: 1;
+    visibility: visible;
+    transition:
+        opacity .24s ease,
+        transform .34s cubic-bezier(.22, 1, .28, 1.16),
+        visibility 0s;
+}
+/* 一层很薄的白覆膜：只提亮，不染色 */
+.cmc-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    background: rgba(var(--cmc-tint), .08);
+    box-shadow:
+        inset 0 24px 40px -32px rgba(255, 255, 255, .9),
+        inset 0 -24px 40px -34px rgba(57, 57, 57, .32);
+}
+
+/* 球在右半边：面板钉右边，免得冲出屏幕 */
+.cmc-panel.cmc-panel-right { left: auto; right: 0; transform-origin: bottom right; }
+/* 球在上半屏：面板往下翻 */
+.cmc-panel.cmc-panel-down { bottom: auto; top: 58px; transform-origin: top left; }
+.cmc-panel.cmc-panel-down.cmc-panel-right { transform-origin: top right; }
+
+.cmc-panel.cmc-hidden {
+    display: flex !important;
+    opacity: 0;
+    visibility: hidden;
+    transform: scale(.9) translateY(8px);
+    pointer-events: none;
+    transition:
+        opacity .18s ease,
+        transform .24s cubic-bezier(.4, 0, .7, .2),
+        visibility 0s .24s;
+}
+.cmc-panel.cmc-panel-down.cmc-hidden { transform: scale(.9) translateY(-8px); }
+
+/* ---------------------------------------------------------------- 头部 */
+
+.cmc-head {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 13px 9px;
+    flex: 0 0 auto;
+}
+.cmc-head::after {
+    content: "";
+    position: absolute;
+    left: 13px;
+    right: 13px;
+    bottom: 0;
+    height: 1px;
+    background: var(--cmc-line);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .5);
+}
+
+.cmc-title { display: flex; align-items: center; gap: 7px; min-width: 0; flex: 1 1 auto; }
+.cmc-title-txt {
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: .1px;
+    color: var(--cmc-ink);
+    white-space: nowrap;
+    flex: 0 0 auto;
+}
+
+.cmc-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: rgba(37, 37, 37, .2);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .6);
+    transition: background .3s ease, box-shadow .3s ease;
+}
+.cmc-dot-wait {
+    background: rgba(82, 82, 82, .5);
+    animation: cmc-dot-breathe 1.8s ease-in-out infinite;
+}
+.cmc-dot-on {
+    background: #27b56a;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .6), 0 0 0 3px rgba(39, 181, 106, .16);
+}
+@keyframes cmc-dot-breathe {
+    0%, 100% { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55), 0 0 0 2px rgba(100, 100, 100, .1); }
+    50%      { box-shadow: inset 0 0 0 1px rgba(255, 255, 255, .55), 0 0 0 5px rgba(100, 100, 100, .05); }
+}
+
+/* 名字#id */
+.cmc-me {
+    margin-left: auto;
+    max-width: 132px;
+    padding: 2px 8px;
+    font-size: 10.5px;
+    font-weight: 600;
+    color: rgba(39, 39, 39, .74);
+    border-radius: 999px;
+    cursor: default;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    background: rgba(var(--cmc-tint-soft), .34);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, .74);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .9),
+        inset 0 -1px 0 rgba(255, 255, 255, .4),
+        0 2px 6px -4px rgba(48, 48, 48, .34);
+}
+
+/* ---------------------------------------------------------------- 状态行 */
+
+.cmc-bar {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+    padding: 0 14px 8px;
+    font-size: 11px;
+    color: rgba(21, 23, 27, .74);
+    letter-spacing: .1px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+/* ---------------------------------------------------------------- 消息区 */
+
+.cmc-list {
+    position: relative;
+    z-index: 1;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 8px 12px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(55, 55, 55, .18) transparent;
+}
+/* 底部冒了「@ 了你」按钮时，给最后一条消息让出位置 */
+.cmc-panel.cmc-jump-on .cmc-list { padding-bottom: 44px; }
+.cmc-list::-webkit-scrollbar { width: 5px; }
+.cmc-list::-webkit-scrollbar-track { background: transparent; }
+.cmc-list::-webkit-scrollbar-thumb { background: rgba(55, 55, 55, .16); border-radius: 3px; }
+.cmc-list:hover::-webkit-scrollbar-thumb { background: rgba(55, 55, 55, .28); }
+
+.cmc-msg {
+    position: relative;
+    max-width: 86%;
+    padding: 8px 11px 7px;
+    border-radius: 15px;
+    font-size: 12.5px;
+    color: var(--cmc-ink);
+    word-break: break-word;
+}
+@keyframes cmc-pop {
+    from { opacity: 0; transform: translateY(6px) scale(.98); }
+    to   { opacity: 1; transform: none; }
+}
+
+/* 只有新消息进场时播一次，已有气泡不会被重画/重播 */
+.cmc-row-in { animation: cmc-pop .3s cubic-bezier(.22, 1, .3, 1.12) both; }
+
+/* 自己的：更亮一点的玻璃 */
+.cmc-self {
+    align-self: flex-end;
+    border-bottom-right-radius: 6px;
+    background: rgba(var(--cmc-tint-soft), .52);
+    -webkit-backdrop-filter: blur(26px) brightness(1.05);
+    backdrop-filter: blur(26px) brightness(1.05);
+    border: 1px solid rgba(255, 255, 255, .8);
+    box-shadow:
+        0 8px 20px -14px rgba(50, 50, 50, .4),
+        inset 0 1px 0 rgba(255, 255, 255, .92),
+        inset 0 -1px 0 rgba(255, 255, 255, .42),
+        inset 0 -10px 16px -16px rgba(56, 56, 56, .3);
+}
+
+/* 对方的：更薄一点的玻璃 */
+.cmc-other {
+    align-self: flex-start;
+    border-bottom-left-radius: 6px;
+    background: rgba(255, 255, 255, .34);
+    -webkit-backdrop-filter: blur(26px) brightness(1.06);
+    backdrop-filter: blur(26px) brightness(1.06);
+    border: 1px solid rgba(255, 255, 255, .66);
+    box-shadow:
+        0 6px 16px -13px rgba(50, 50, 50, .34),
+        inset 0 1px 0 rgba(255, 255, 255, .8),
+        inset 0 -1px 0 rgba(255, 255, 255, .3);
+}
+
+.cmc-meta {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 2px;
+    font-size: 9.5px;
+    letter-spacing: .1px;
+    color: rgba(36, 36, 36, .6);
+}
+.cmc-name {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cmc-uid { flex: 0 0 auto; font-weight: 500; opacity: .72; }
+.cmc-time { flex: 0 0 auto; opacity: .82; font-variant-numeric: tabular-nums; }
+.cmc-text { position: relative; z-index: 1; white-space: pre-wrap; }
+.cmc-tick {
+    flex: 0 0 auto;
+    font-size: 10.5px;
+    font-weight: 700;
+    color: rgb(var(--cmc-tint));
+}
+.cmc-flag { position: relative; margin-top: 3px; font-size: 10px; color: rgba(36, 36, 36, .46); }
+.cmc-flag-bad { color: #a82a22; }
+
+.cmc-sys {
+    align-self: center;
+    max-width: 92%;
+    padding: 4px 10px;
+    text-align: center;
+    font-size: 10.5px;
+    color: rgba(36, 36, 36, .52);
+    border-radius: 999px;
+    background: rgba(var(--cmc-tint-soft), .2);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border: 1px solid rgba(255, 255, 255, .5);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .68);
+    animation: cmc-pop .28s cubic-bezier(.22, 1, .3, 1.1) both;
+}
+.cmc-sys-bad { color: #a82a22; border-color: rgba(255, 255, 255, .58); }
+
+/* ---------------------------------------------------------------- 输入区 */
+
+.cmc-input-area {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+    display: flex;
+    gap: 7px;
+    padding: 9px 11px 11px;
+}
+.cmc-input-area::before {
+    content: "";
+    position: absolute;
+    left: 13px;
+    right: 13px;
+    top: 0;
+    height: 1px;
+    background: var(--cmc-line);
+    box-shadow: 0 1px 0 rgba(255, 255, 255, .5);
+}
+
+#cmc-input {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 34px;
+    padding: 0 13px;
+    font-family: inherit;
+    font-size: 12.5px;
+    color: var(--cmc-ink);
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .74);
+    background: rgba(255, 255, 255, .24);
+    -webkit-backdrop-filter: blur(24px);
+    backdrop-filter: blur(24px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .9),
+        inset 0 -1px 0 rgba(255, 255, 255, .42),
+        inset 0 2px 6px rgba(48, 48, 48, .05);
+    outline: none;
+    transition: border-color .2s ease, box-shadow .2s ease, background .2s ease;
+}
+#cmc-input::placeholder { color: rgba(36, 36, 36, .52); }
+#cmc-input:focus {
+    background: rgba(255, 255, 255, .38);
+    border-color: rgba(255, 255, 255, .96);
+    box-shadow:
+        0 0 0 3px rgba(var(--cmc-tint), .18),
+        inset 0 1px 0 rgba(255, 255, 255, .96),
+        inset 0 -1px 0 rgba(255, 255, 255, .46),
+        inset 0 2px 6px rgba(48, 48, 48, .04);
+}
+
+#cmc-send {
+    flex: 0 0 auto;
+    height: 34px;
+    padding: 0 15px;
+    font-family: inherit;
+    font-size: 12.5px;
+    font-weight: 650;
+    letter-spacing: .2px;
+    color: rgb(var(--cmc-tint-deep));
+    cursor: pointer;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .82);
+    background: rgba(var(--cmc-tint-soft), .64);
+    -webkit-backdrop-filter: blur(22px);
+    backdrop-filter: blur(22px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .96),
+        inset 0 -1px 0 rgba(255, 255, 255, .45),
+        inset 0 -9px 14px -12px rgba(72, 72, 72, .5),
+        0 4px 12px -8px rgba(50, 50, 50, .4);
+    transition: transform .18s cubic-bezier(.22, 1, .3, 1.2), background .18s ease, box-shadow .18s ease;
+}
+#cmc-send:hover {
+    background: rgba(var(--cmc-tint-soft), .84);
+    transform: translateY(-1px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 1),
+        inset 0 -1px 0 rgba(255, 255, 255, .5),
+        inset 0 -9px 14px -12px rgba(72, 72, 72, .45),
+        0 6px 16px -8px rgba(50, 50, 50, .42);
+}
+#cmc-send:active { transform: scale(.96); }
+
+/* ---------------------------------------------------------------- 动效 */
+
+@keyframes cmc-badge-in {
+    from { opacity: 0; transform: scale(.4); }
+    to   { opacity: 1; transform: none; }
+}
+
+@keyframes cmc-flash-kf {
+    0%   { box-shadow: 0 0 0 0 rgba(100, 100, 100, .3), 0 12px 26px -14px rgba(48, 48, 48, .5); }
+    70%  { box-shadow: 0 0 0 12px rgba(100, 100, 100, 0), 0 12px 26px -14px rgba(48, 48, 48, .5); }
+    100% { box-shadow: 0 0 0 0 rgba(100, 100, 100, 0), 0 12px 26px -14px rgba(48, 48, 48, .5); }
+}
+.cmc-btn.cmc-flash { animation: cmc-flash-kf .9s ease-out 2; }
+
+/* 小屏收敛 */
+@media (max-width: 430px) {
+    .cmc-root { left: 12px; bottom: 12px; }
+    .cmc-panel {
+        width: calc(100vw - 24px);
+        height: min(412px, calc(100vh - 96px));
+        border-radius: 20px;
+    }
+}
+
+/* 尊重系统的「减弱动态效果」 */
+@media (prefers-reduced-motion: reduce) {
+    .cmc-dot-wait,
+    .cmc-badge,
+    .cmc-msg,
+    .cmc-sys,
+    .cmc-jump { animation: none !important; }
+    .cmc-btn, .cmc-panel, .cmc-root,
+    .cmc-btn-icon, .cmc-btn-chevron { transition-duration: .01ms !important; }
+}
+
+/* ---------------------------------------------------------------- 头像 / 图片 / @ */
+
+.cmc-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 7px;
+    max-width: 100%;
+}
+.cmc-row-self { flex-direction: row-reverse; }
+
+/* 空态：一块居中的淡蓝提示，比一片空白玻璃体面 */
+.cmc-empty {
+    margin: auto;
+    padding: 8px 16px 22px;
+    text-align: center;
+    color: rgba(36, 36, 36, .4);
+}
+.cmc-empty-t {
+    font-size: 12px;
+    font-weight: 650;
+    letter-spacing: .2px;
+    color: rgba(36, 36, 36, .52);
+    margin-bottom: 5px;
+}
+
+.cmc-ava {
+    flex: 0 0 auto;
+    width: 32px;
+    height: 32px;
+    border-radius: 11px;
+    overflow: hidden;
+    display: grid;
+    place-items: center;
+    color: rgba(57, 57, 57, .86);
+    background: rgba(var(--cmc-tint-soft), .58);
+    -webkit-backdrop-filter: blur(20px) brightness(1.04);
+    backdrop-filter: blur(20px) brightness(1.04);
+    border: 1px solid rgba(255, 255, 255, .9);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .96),
+        inset 0 -1px 0 rgba(255, 255, 255, .55),
+        inset 0 -7px 12px -9px rgba(89, 89, 89, .5),
+        0 2px 6px -4px rgba(66, 66, 66, .4);
+    margin-bottom: 2px;
+}
+.cmc-ava img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.cmc-ava-txt {
+    font-size: 13px;
+    font-weight: 650;
+    letter-spacing: .2px;
+    color: inherit;
+}
+.cmc-ava-sm { width: 24px; height: 24px; border-radius: 8px; }
+.cmc-ava-sm .cmc-ava-txt { font-size: 10px; }
+
+.cmc-msg { max-width: calc(100% - 39px); }
+
+/* 一次连发的多张图：同一个气泡里排成宫格 */
+.cmc-imgs {
+    display: grid;
+    grid-template-columns: repeat(2, 82px);
+    gap: 3px;
+    margin: 3px 0 1px;
+    width: max-content;
+    max-width: 100%;
+}
+.cmc-imgs.cmc-imgs-3 { grid-template-columns: repeat(3, 54px); }
+.cmc-imgs.cmc-imgs-1 { grid-template-columns: auto; }
+
+.cmc-img {
+    display: block;
+    width: 100%;
+    height: 82px;
+    max-width: 100%;
+    object-fit: cover;
+    border-radius: 10px;
+    cursor: zoom-in;
+    border: 1px solid rgba(255, 255, 255, .78);
+    box-shadow: 0 4px 14px -10px rgba(45, 45, 45, .6);
+    background: rgba(255, 255, 255, .24);
+}
+.cmc-imgs-3 .cmc-img { height: 54px; }
+.cmc-imgs-1 .cmc-img {
+    width: auto;
+    height: auto;
+    max-width: 168px;
+    max-height: 168px;
+    border-radius: 11px;
+}
+
+/* 被 @ 到：一圈深色描边 */
+.cmc-at {
+    box-shadow:
+        0 0 0 1.5px rgba(var(--cmc-tint), .5),
+        0 8px 20px -14px rgba(var(--cmc-tint-deep), .4),
+        inset 0 1px 0 rgba(255, 255, 255, .85);
+}
+.cmc-atme {
+    flex: 0 0 auto;
+    padding: 0 5px;
+    font-size: 9px;
+    font-weight: 700;
+    color: #fff;
+    border-radius: 999px;
+    background: var(--cmc-accent);
+}
+
+/* 跳到那条 @ 消息以后，闪两下 */
+.cmc-row.cmc-hit .cmc-msg { animation: cmc-hit-ring 1.6s ease-out 1; }
+@keyframes cmc-hit-ring {
+    0%   { box-shadow: 0 0 0 0 rgba(var(--cmc-tint), .6), inset 0 1px 0 rgba(255, 255, 255, .9); }
+    55%  { box-shadow: 0 0 0 7px rgba(var(--cmc-tint), .14), inset 0 1px 0 rgba(255, 255, 255, .9); }
+    100% { box-shadow: 0 0 0 0 rgba(var(--cmc-tint), 0), inset 0 1px 0 rgba(255, 255, 255, .9); }
+}
+
+/* 输入区里的两个玻璃小按钮 */
+.cmc-icon-btn {
+    flex: 0 0 auto;
+    width: 27px;
+    height: 27px;
+    display: grid;
+    place-items: center;
+    align-self: center;
+    padding: 0;
+    cursor: pointer;
+    color: rgba(52, 52, 52, .66);
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .74);
+    background: rgba(255, 255, 255, .17);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, .88),
+        inset 0 -1px 0 rgba(255, 255, 255, .38);
+    transition: transform .16s ease, background .16s ease;
+}
+.cmc-icon-btn:hover { background: rgba(255, 255, 255, .32); transform: translateY(-1px); }
+.cmc-icon-btn:active { transform: scale(.92); }
+
+.cmc-file { display: none !important; }
+
+/* 待发送图片预览 */
+.cmc-preview {
+    position: relative;
+    z-index: 1;
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px 0;
+}
+/* 多选时横向排开，多了可以横滑，不挤压输入框 */
+.cmc-preview-strip {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 6px 12px 5px 0;
+    scrollbar-width: none;          /* 条子很窄，滚动条会显得很脏，直接藏掉 */
+    /* 右边留一点渐隐，提示还能往右滑 */
+    -webkit-mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
+    mask-image: linear-gradient(90deg, #000 0, #000 calc(100% - 26px), transparent 100%);
+}
+.cmc-preview-strip::-webkit-scrollbar { display: none; }
+.cmc-thumb {
+    position: relative;
+    flex: 0 0 auto;
+    width: 40px;
+    height: 40px;
+}
+.cmc-thumb img {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    object-fit: cover;
+    display: block;
+    border: 1px solid rgba(255, 255, 255, .78);
+    box-shadow: 0 3px 10px -7px rgba(45, 45, 45, .55);
+}
+.cmc-thumb-x {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    width: 16px;
+    height: 16px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    font-size: 11px;
+    line-height: 1;
+    color: rgba(39, 39, 39, .82);
+    cursor: pointer;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .92);
+    background: rgba(249, 249, 249, .94);
+    box-shadow: 0 1px 3px rgba(37, 37, 37, .24);
+}
+.cmc-thumb-x:hover { background: #fff; color: #0b1a30; }
+.cmc-preview-meta {
+    flex: 0 0 auto;
+    font-size: 10px;
+    white-space: nowrap;
+    color: rgba(36, 36, 36, .54);
+}
+.cmc-preview-x {
+    margin-left: auto;
+    width: 22px;
+    height: 22px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    font-size: 15px;
+    line-height: 1;
+    color: rgba(36, 36, 36, .58);
+    cursor: pointer;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, .74);
+    background: rgba(255, 255, 255, .2);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, .88);
+}
+.cmc-preview-x:hover { color: var(--cmc-ink); background: rgba(255, 255, 255, .36); }
+
+/* @ 候选：玻璃浮层 */
+.cmc-mention {
+    position: absolute;
+    left: 10px;
+    right: 10px;
+    bottom: 58px;
+    z-index: 4;
+    max-height: 172px;
+    overflow-y: auto;
+    padding: 4px;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, .72);
+    background: rgba(255, 255, 255, .42);
+    -webkit-backdrop-filter: blur(34px);
+    backdrop-filter: blur(34px);
+    box-shadow:
+        0 18px 38px -20px rgba(41, 41, 41, .5),
+        inset 0 1px 0 rgba(255, 255, 255, .92),
+        inset 0 -1px 0 rgba(255, 255, 255, .42);
+    animation: cmc-pop .18s cubic-bezier(.22, 1, .3, 1.1) both;
+}
+.cmc-mention-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: 9px;
+    cursor: pointer;
+}
+.cmc-mention-item:hover { background: rgba(255, 255, 255, .5); }
+.cmc-mention-on { background: rgba(var(--cmc-tint), .14); }
+.cmc-mention-txt { display: flex; align-items: baseline; gap: 5px; min-width: 0; }
+.cmc-mention-name {
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cmc-mention-id { font-size: 9.5px; color: rgba(36, 36, 36, .44); }
+.cmc-mention-empty { padding: 10px 8px; font-size: 11px; color: rgba(36, 36, 36, .44); text-align: center; }
+
+/* ---------------------------------------------------------------- @ 跳转按钮 */
+
+.cmc-jump {
+    position: absolute;
+    left: 50%;
+    bottom: 60px;
+    z-index: 3;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    max-width: calc(100% - 26px);
+    padding: 6px 11px;
+    font-family: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: .1px;
+    white-space: nowrap;
+    color: rgb(var(--cmc-tint-deep));
+    cursor: pointer;
+    border-radius: 999px;
+    border: 1px solid rgba(255, 255, 255, .92);
+    background: rgba(255, 255, 255, .86);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    box-shadow:
+        0 0 0 .5px rgba(30, 32, 36, .08),
+        0 10px 22px -12px rgba(40, 44, 52, .34),
+        inset 0 1px 0 rgba(255, 255, 255, .96),
+        inset 0 -1px 0 rgba(255, 255, 255, .5);
+    transform: translateX(-50%) translateY(4px);
+    opacity: 0;
+    transition: opacity .2s ease, transform .3s cubic-bezier(.22, 1, .3, 1.2), background .18s ease;
+    animation: cmc-jump-in .3s cubic-bezier(.22, 1, .3, 1.2) both;
+}
+.cmc-jump:not(.cmc-hidden) { opacity: 1; transform: translateX(-50%) translateY(0); }
+.cmc-jump:hover { background: rgba(255, 255, 255, .92); }
+.cmc-jump:active { transform: translateX(-50%) scale(.96); }
+
+/* 面板往下翻时，按钮贴在输入框上方 */
+.cmc-panel-down .cmc-jump { bottom: 60px; }
+
+.cmc-jump-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+    background: rgb(var(--cmc-tint));
+    box-shadow: 0 0 0 3px rgba(var(--cmc-tint), .18);
+}
+.cmc-jump-txt {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+.cmc-jump-go { display: grid; place-items: center; flex: 0 0 auto; transition: transform .2s ease; }
+.cmc-jump-go svg { display: block; }
+.cmc-jump.cmc-jump-down .cmc-jump-go { transform: rotate(180deg); }
+
+@keyframes cmc-jump-in {
+    from { opacity: 0; transform: translateX(-50%) translateY(10px) scale(.9); }
+    to   { opacity: 1; transform: translateX(-50%) translateY(0) scale(1); }
+}
+
+/* 看大图 */
+.cmc-lightbox {
+    position: fixed;
+    inset: 0;
+    z-index: 5;
+    display: grid;
+    place-items: center;
+    background: rgba(19, 19, 19, .46);
+    -webkit-backdrop-filter: blur(18px);
+    backdrop-filter: blur(18px);
+    animation: cmc-fade .16s ease both;
+    cursor: zoom-out;
+}
+.cmc-lightbox img {
+    max-width: 84vw;
+    max-height: 84vh;
+    border-radius: 14px;
+    border: 1px solid rgba(255, 255, 255, .5);
+    box-shadow: 0 30px 70px -24px rgba(0, 0, 0, .65);
+    background: #fff;
+}
+@keyframes cmc-fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* 透明图（PNG/WebP 带 alpha）：底下铺一层很淡的棋盘格，
+   透明区域一眼看得出来；不透明的图会把自己的底盖住，看起来跟以前一样。 */
+.cmc-thumb img,
+.cmc-img,
+.cmc-lightbox img {
+    background-color: rgba(255, 255, 255, .62);
+    background-image:
+        linear-gradient(45deg, rgba(84, 84, 84, .1) 25%, transparent 25%, transparent 75%, rgba(84, 84, 84, .1) 75%),
+        linear-gradient(45deg, rgba(84, 84, 84, .1) 25%, transparent 25%, transparent 75%, rgba(84, 84, 84, .1) 75%);
+    background-size: 8px 8px, 8px 8px;
+    background-position: 0 0, 4px 4px;
+}

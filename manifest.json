@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Kitten4 协作聊天（Kitten4-Collaborative-Chat）",
+  "version": "3.5",
+  "description": "在 Kitten4 多人协作里无痕聊天：消息伪装成一条原生注释经协作通道传输，不写进作品、不在画布留痕。",
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  },
+  "action": {
+    "default_title": "Kitten4 协作聊天",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
+  },
+  "minimum_chrome_version": "111",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "*://kitten4.codemao.cn/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["*://kitten4.codemao.cn/"],
+      "js": ["inject.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": false
+    },
+    {
+      "matches": ["*://kitten4.codemao.cn/"],
+      "js": ["content.js"],
+      "css": ["style.css"],
+      "run_at": "document_start",
+      "all_frames": false
+    }
+  ]
+}
