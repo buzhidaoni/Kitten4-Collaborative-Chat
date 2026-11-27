@@ -18,12 +18,12 @@
     if (window.__cmChatInstalled) return;
     window.__cmChatInstalled = true;
 
-    var VERSION = '4.0';
+    var VERSION = '4.1';
     var PREFIX = '#%^&114514*/n';     
     var COLLAB_HOST = 'socketcoll.codemao.cn';
-    var COMMENT_LOCATION = [100, 100]; 
+    var COMMENT_LOCATION = [9999, 9999];
     var COMMENT_SIZE = [140, 48];
-    var KEEP_MS = 1500;                
+    var KEEP_MS = 1500;
     var NativeWebSocket = window.WebSocket;
 
     var state = {
@@ -155,6 +155,12 @@
     }
 
     
+    function isOurLoc(loc) {
+        return Array.isArray(loc) &&
+            Number(loc[0]) === COMMENT_LOCATION[0] &&
+            Number(loc[1]) === COMMENT_LOCATION[1];
+    }
+
     function inspectComment(cmd) {
         var i = cmd.indexOf('comments');
         if (i < 0 || cmd[0] !== 'theatre') return null;
@@ -165,6 +171,7 @@
 
         if (action.i && typeof action.i === 'object' && typeof action.i.text === 'string') {
             if (action.i.text.indexOf(PREFIX) !== 0) return null;   
+            if (!isOurLoc(action.i.location)) return { kind: 'elsewhere', cid: cid };
             return { kind: 'create', cid: cid, text: action.i.text.slice(PREFIX.length) };
         }
         if (action.r === true && isOurs) return { kind: 'delete', cid: cid };
@@ -301,6 +308,11 @@
             var pend = state.pendingChat;
             if (a.code === 1) {
                 state.pendingChat = null;
+                if (state.burnChat) {
+                    var burnNow = state.burnChat;
+                    state.burnChat = null;
+                    burnNow(0);
+                }
             } else if (pend && !pend.retried) {
                 
                 pend.retried = true;
@@ -495,24 +507,34 @@
                 }
             });
             state.pendingChat = { cid: cid, cmd: cmd, retried: false };
+
+            var burned = false;
+            var burn = function (attempt) {
+                if (burned) return;
+                var wait = 300 - (Date.now() - (state.lastAppOpAt || 0));
+                if (wait > 0 && attempt < 40) {
+                    setTimeout(function () { burn(attempt + 1); }, wait + 30);
+                    return;
+                }
+                burned = true;
+                try {
+                    if (socket && socket.readyState === 1) sendCommand(commentCmd(cid, { r: true }));
+                } catch (e) {
+                    if (attempt < 3) {
+                        burned = false;
+                        setTimeout(function () { burn(attempt + 1); }, 800);
+                    }
+                }
+            };
+            state.burnChat = burn;
+
             sendCommand(cmd);
 
             state.msgOut++;
             toUI({ type: 'CM_SENT', reqId: reqId, ok: true, cid: cid });
             status();
 
-            var burn = function (attempt) {
-                return function () {
-                    var wait = 300 - (Date.now() - (state.lastAppOpAt || 0));
-                    if (wait > 0) { setTimeout(burn(attempt), wait + 30); return; }
-                    try {
-                        if (socket && socket.readyState === 1) sendCommand(commentCmd(cid, { r: true }));
-                    } catch (e) {
-                        if (attempt < 1) setTimeout(burn(attempt + 1), 800);
-                    }
-                };
-            };
-            setTimeout(burn(0), KEEP_MS);
+            setTimeout(function () { burn(0); }, KEEP_MS);
         } catch (e) {
             state.lastError = e.message;
             toUI({ type: 'CM_SENT', reqId: reqId, ok: false, error: e.message });
